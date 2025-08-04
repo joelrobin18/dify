@@ -102,7 +102,7 @@ class GraphEngine:
 
         # Subsystems
         self.output_registry = OutputRegistry()
-        self.response_coordinator = ResponseStreamCoordinator(output_registry=self.output_registry)
+        self.response_coordinator = ResponseStreamCoordinator()
 
         # Worker threads (10 workers as specified)
         self.workers: list[Worker] = []
@@ -289,8 +289,6 @@ class GraphEngine:
                 self.output_registry.append_chunk(event.selector, event.chunk)
                 if event.is_final:
                     self.output_registry.close_stream(event.selector)
-                # Notify response coordinator about variable update
-                self.response_coordinator.on_variable_update(event.selector)
 
             # Check if this is a response node
             if self.response_coordinator.is_response_node(node_id):
@@ -336,9 +334,7 @@ class GraphEngine:
         skipped_edges: list[Edge] = []
 
         for edge_id in outgoing_edge_ids:
-            edge = self.graph.edges.get(edge_id)
-            if edge is None:
-                continue
+            edge = self.graph.edges[edge_id]
             # Check if this is a conditional edge (has non-default source_handle)
             if edge.source_handle != "source":
                 # For conditional edges, check if it matches the taken branch
@@ -392,23 +388,23 @@ class GraphEngine:
         # Check if all incoming edges are skipped
         all_skipped = True
         for edge_id in incoming_edge_ids:
-            edge = self.graph.edges.get(edge_id)
-            if edge and edge.state != NodeState.SKIPPED:
+            edge = self.graph.edges[edge_id]
+            if edge.state != NodeState.SKIPPED:
                 all_skipped = False
                 break
 
         # Only if ALL incoming edges are skipped, skip this node
         if all_skipped:
             # Mark the node itself as skipped
-            node = self.graph.nodes.get(node_id)
-            if node and node.state == NodeState.UNKNOWN:
+            node = self.graph.nodes[node_id]
+            if node.state == NodeState.UNKNOWN:
                 node.state = NodeState.SKIPPED
 
             # Mark all outgoing edges from this node as skipped
             outgoing_edge_ids = self.graph.out_edges.get(node_id, [])
             for edge_id in outgoing_edge_ids:
-                edge = self.graph.edges.get(edge_id)
-                if edge and edge.state == NodeState.UNKNOWN:
+                edge = self.graph.edges[edge_id]
+                if edge.state == NodeState.UNKNOWN:
                     edge.state = NodeState.SKIPPED
                     # Recursively check descendants
                     self._mark_node_and_descendants_skipped(edge.head)
@@ -426,8 +422,8 @@ class GraphEngine:
             True if the node is ready for execution
         """
         # Check if node is already skipped
-        node = self.graph.nodes.get(node_id)
-        if node and node.state == NodeState.SKIPPED:
+        node = self.graph.nodes[node_id]
+        if node.state == NodeState.SKIPPED:
             return False
 
         # Get all incoming edges to this node
@@ -441,12 +437,11 @@ class GraphEngine:
         has_taken = False
 
         for edge_id in incoming_edge_ids:
-            edge = self.graph.edges.get(edge_id)
-            if edge:
-                if edge.state == NodeState.UNKNOWN:
-                    has_unknown = True
-                elif edge.state == NodeState.TAKEN:
-                    has_taken = True
+            edge = self.graph.edges[edge_id]
+            if edge.state == NodeState.UNKNOWN:
+                has_unknown = True
+            elif edge.state == NodeState.TAKEN:
+                has_taken = True
 
         # Node is ready if no unknown edges and at least one taken edge
         return not has_unknown and has_taken
