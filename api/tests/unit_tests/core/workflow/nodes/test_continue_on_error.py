@@ -23,7 +23,6 @@ from core.workflow.nodes.llm.node import LLMNode
 from core.workflow.nodes.node_factory import DefaultNodeFactory
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 class ContinueOnErrorTestHelper:
@@ -174,7 +173,6 @@ class ContinueOnErrorTestHelper:
         init_params = GraphInitParams(
             tenant_id="1",
             app_id="1",
-            workflow_type=WorkflowType.WORKFLOW,
             workflow_id="1",
             graph_config=graph_config,
             user_id="1",

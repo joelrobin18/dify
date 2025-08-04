@@ -141,7 +141,6 @@ class WorkflowEntry:
         graph_init_params = GraphInitParams(
             tenant_id=workflow.tenant_id,
             app_id=workflow.app_id,
-            workflow_type=WorkflowType.value_of(workflow.type),
             workflow_id=workflow.id,
             graph_config=workflow.graph_dict,
             user_id=user_id,
@@ -291,7 +290,6 @@ class WorkflowEntry:
         graph_init_params = GraphInitParams(
             tenant_id=tenant_id,
             app_id="",
-            workflow_type=WorkflowType.WORKFLOW,
             workflow_id="",
             graph_config=graph_dict,
             user_id=user_id,

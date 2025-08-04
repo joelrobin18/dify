@@ -14,7 +14,7 @@ from core.workflow.nodes.end.entities import EndStreamParam
 from core.workflow.nodes.tool import ToolNode
 from core.workflow.nodes.tool.entities import ToolNodeData
 from core.workflow.system_variable import SystemVariable
-from models import UserFrom, WorkflowType
+from models import UserFrom
 
 
 def _create_tool_node():
@@ -46,7 +46,6 @@ def _create_tool_node():
         graph_init_params=GraphInitParams(
             tenant_id="1",
             app_id="1",
-            workflow_type=WorkflowType.WORKFLOW,
             workflow_id="1",
             graph_config={},
             user_id="1",

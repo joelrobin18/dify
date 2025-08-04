@@ -16,7 +16,6 @@ from models.enums import UserFrom
 from tests.integration_tests.workflow.nodes.__mock.model import get_mocked_fetch_model_config
 
 """FOR MOCK FIXTURES, DO NOT REMOVE"""
-from models.workflow import WorkflowType
 from tests.integration_tests.model_runtime.__mock.plugin_daemon import setup_model_mock
 
 
@@ -51,7 +50,6 @@ def init_parameter_extractor_node(config: dict):
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

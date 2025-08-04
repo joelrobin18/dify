@@ -11,7 +11,6 @@ from core.workflow.nodes.node_factory import DefaultNodeFactory
 from core.workflow.system_variable import SystemVariable
 from extensions.ext_database import db
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 def test_execute_answer():
@@ -39,7 +38,6 @@ def test_execute_answer():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

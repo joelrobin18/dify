@@ -5,7 +5,7 @@ import pytest
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.file import File, FileTransferMethod, FileType
 from core.variables import ArrayFileSegment
-from core.workflow.enums import WorkflowNodeExecutionStatus, WorkflowType
+from core.workflow.enums import WorkflowNodeExecutionStatus
 from core.workflow.nodes.list_operator.entities import (
     ExtractConfig,
     FilterBy,
@@ -43,7 +43,6 @@ def list_operator_node():
     graph_init_params = MagicMock()
     graph_init_params.tenant_id = "test_tenant"
     graph_init_params.app_id = "test_app"
-    graph_init_params.workflow_type = WorkflowType.WORKFLOW
     graph_init_params.workflow_id = "test_workflow"
     graph_init_params.graph_config = {}
     graph_init_params.user_id = "test_user"

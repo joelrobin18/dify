@@ -11,7 +11,7 @@ from core.variables import ArrayFileSegment
 from core.variables.segments import ArrayStringSegment
 from core.variables.variables import StringVariable
 from core.workflow.entities import GraphInitParams
-from core.workflow.enums import NodeType, WorkflowNodeExecutionStatus, WorkflowType
+from core.workflow.enums import NodeType, WorkflowNodeExecutionStatus
 from core.workflow.events import NodeRunResult
 from core.workflow.nodes.document_extractor import DocumentExtractorNode, DocumentExtractorNodeData
 from core.workflow.nodes.document_extractor.node import (
@@ -28,7 +28,6 @@ def graph_init_params() -> GraphInitParams:
     return GraphInitParams(
         tenant_id="test_tenant",
         app_id="test_app",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="test_workflow",
         graph_config={},
         user_id="test_user",

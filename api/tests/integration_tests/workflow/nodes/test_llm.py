@@ -14,7 +14,6 @@ from core.workflow.nodes.llm.node import LLMNode
 from core.workflow.system_variable import SystemVariable
 from extensions.ext_database import db
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 """FOR MOCK FIXTURES, DO NOT REMOVE"""
 
@@ -42,7 +41,6 @@ def init_llm_node(config: dict) -> LLMNode:
     init_params = GraphInitParams(
         tenant_id=tenant_id,
         app_id=app_id,
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id=workflow_id,
         graph_config=graph_config,
         user_id=user_id,

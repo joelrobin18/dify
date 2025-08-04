@@ -18,7 +18,6 @@ from core.workflow.nodes.http_request import (
 )
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 @pytest.mark.skip(
@@ -74,7 +73,6 @@ def test_http_request_node_binary_file(monkeypatch):
         graph_init_params=GraphInitParams(
             tenant_id="1",
             app_id="1",
-            workflow_type=WorkflowType.WORKFLOW,
             workflow_id="1",
             graph_config={},
             user_id="1",
@@ -172,7 +170,6 @@ def test_http_request_node_form_with_file(monkeypatch):
         graph_init_params=GraphInitParams(
             tenant_id="1",
             app_id="1",
-            workflow_type=WorkflowType.WORKFLOW,
             workflow_id="1",
             graph_config={},
             user_id="1",
@@ -294,7 +291,6 @@ def test_http_request_node_form_with_multiple_files(monkeypatch):
         graph_init_params=GraphInitParams(
             tenant_id="1",
             app_id="1",
-            workflow_type=WorkflowType.WORKFLOW,
             workflow_id="1",
             graph_config={},
             user_id="1",

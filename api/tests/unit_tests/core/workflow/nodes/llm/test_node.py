@@ -37,7 +37,6 @@ from core.workflow.nodes.llm.node import LLMNode
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
 from models.provider import ProviderType
-from models.workflow import WorkflowType
 
 
 class MockTokenBufferMemory:
@@ -75,7 +74,6 @@ def graph_init_params() -> GraphInitParams:
     return GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config={},
         user_id="1",

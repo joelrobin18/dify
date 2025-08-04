@@ -64,7 +64,6 @@ class GraphEngine:
         Args:
             tenant_id: Tenant identifier
             app_id: Application identifier
-            workflow_type: Type of workflow (WORKFLOW or CHAT)
             workflow_id: Workflow identifier
             user_id: User identifier
             user_from: Source of user (ACCOUNT, etc.)

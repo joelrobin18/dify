@@ -6,7 +6,7 @@ from core.app.entities.app_invoke_entities import InvokeFrom
 from core.file import File, FileTransferMethod, FileType
 from core.variables import ArrayFileSegment
 from core.workflow.entities import GraphInitParams, GraphRuntimeState, VariablePool
-from core.workflow.enums import WorkflowNodeExecutionStatus, WorkflowType
+from core.workflow.enums import WorkflowNodeExecutionStatus
 from core.workflow.graph import Graph
 from core.workflow.nodes.if_else.entities import IfElseNodeData
 from core.workflow.nodes.if_else.if_else_node import IfElseNode
@@ -23,7 +23,6 @@ def test_execute_if_else_result_true():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",
@@ -133,7 +132,6 @@ def test_execute_if_else_result_false():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",
@@ -237,7 +235,6 @@ def test_array_file_contains_file_name():
     graph_init_params = Mock()
     graph_init_params.tenant_id = "test_tenant"
     graph_init_params.app_id = "test_app"
-    graph_init_params.workflow_type = WorkflowType.WORKFLOW
     graph_init_params.workflow_id = "test_workflow"
     graph_init_params.graph_config = {}
     graph_init_params.user_id = "test_user"

@@ -10,7 +10,6 @@ from core.workflow.graph import Graph
 from core.workflow.nodes.http_request.node import HttpRequestNode
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 from tests.integration_tests.workflow.nodes.__mock.http import setup_http_mock
 
 
@@ -31,7 +30,6 @@ def init_http_node(config: dict):
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

@@ -97,7 +97,7 @@ def mock_workflow_execution_repository():
 def real_workflow_entity():
     return CycleManagerWorkflowInfo(
         workflow_id="test-workflow-id",  # Matches ID used in other fixtures
-        workflow_type=WorkflowType.CHAT,
+        workflow_type=WorkflowType.WORKFLOW,
         version="1.0.0",
         graph_data={
             "nodes": [
@@ -211,8 +211,8 @@ def test_handle_workflow_run_success(workflow_cycle_manager, mock_workflow_execu
     workflow_execution = WorkflowExecution(
         id_="test-workflow-run-id",
         workflow_id="test-workflow-id",
+        workflow_type=WorkflowType.WORKFLOW,
         workflow_version="1.0",
-        workflow_type=WorkflowType.CHAT,
         graph={"nodes": [], "edges": []},
         inputs={"query": "test query"},
         started_at=datetime.now(UTC).replace(tzinfo=None),
@@ -245,8 +245,8 @@ def test_handle_workflow_run_failed(workflow_cycle_manager, mock_workflow_execut
     workflow_execution = WorkflowExecution(
         id_="test-workflow-run-id",
         workflow_id="test-workflow-id",
+        workflow_type=WorkflowType.WORKFLOW,
         workflow_version="1.0",
-        workflow_type=WorkflowType.CHAT,
         graph={"nodes": [], "edges": []},
         inputs={"query": "test query"},
         started_at=datetime.now(UTC).replace(tzinfo=None),
@@ -282,8 +282,8 @@ def test_handle_node_execution_start(workflow_cycle_manager, mock_workflow_execu
     workflow_execution = WorkflowExecution(
         id_="test-workflow-execution-id",
         workflow_id="test-workflow-id",
+        workflow_type=WorkflowType.WORKFLOW,
         workflow_version="1.0",
-        workflow_type=WorkflowType.CHAT,
         graph={"nodes": [], "edges": []},
         inputs={"query": "test query"},
         started_at=datetime.now(UTC).replace(tzinfo=None),
@@ -330,8 +330,8 @@ def test_get_workflow_execution_or_raise_error(workflow_cycle_manager, mock_work
     workflow_execution = WorkflowExecution(
         id_="test-workflow-run-id",
         workflow_id="test-workflow-id",
+        workflow_type=WorkflowType.WORKFLOW,
         workflow_version="1.0",
-        workflow_type=WorkflowType.CHAT,
         graph={"nodes": [], "edges": []},
         inputs={"query": "test query"},
         started_at=datetime.now(UTC).replace(tzinfo=None),
@@ -404,8 +404,8 @@ def test_handle_workflow_run_partial_success(workflow_cycle_manager, mock_workfl
     workflow_execution = WorkflowExecution(
         id_="test-workflow-run-id",
         workflow_id="test-workflow-id",
+        workflow_type=WorkflowType.WORKFLOW,
         workflow_version="1.0",
-        workflow_type=WorkflowType.CHAT,
         graph={"nodes": [], "edges": []},
         inputs={"query": "test query"},
         started_at=datetime.now(UTC).replace(tzinfo=None),

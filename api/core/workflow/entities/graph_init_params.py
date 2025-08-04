@@ -8,7 +8,6 @@ class GraphInitParams(BaseModel):
     # init params
     tenant_id: str = Field(..., description="tenant / workspace id")
     app_id: str = Field(..., description="app id")
-    workflow_type: str = Field(..., description="workflow type")  # Should be WorkflowType enum: 'workflow' | 'chat'
     workflow_id: str = Field(..., description="workflow id")
     graph_config: Mapping[str, Any] = Field(..., description="graph config")
     user_id: str = Field(..., description="user id")

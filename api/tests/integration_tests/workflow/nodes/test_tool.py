@@ -11,7 +11,6 @@ from core.workflow.graph import Graph
 from core.workflow.nodes.tool.tool_node import ToolNode
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 def init_tool_node(config: dict):
@@ -31,7 +30,6 @@ def init_tool_node(config: dict):
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

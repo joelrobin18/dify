@@ -10,7 +10,6 @@ from core.workflow.graph import Graph
 from core.workflow.nodes.template_transform.template_transform_node import TemplateTransformNode
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 from tests.integration_tests.workflow.nodes.__mock.code_executor import setup_code_executor_mock
 
 
@@ -48,7 +47,6 @@ def test_execute_code(setup_code_executor_mock):
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

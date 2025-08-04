@@ -87,13 +87,11 @@ class WorkflowRunner:
         # Extract workflow type (default to WORKFLOW)
         app_config = fixture_data.get("app", {})
         mode = app_config.get("mode", "workflow")
-        workflow_type = "chat" if mode == "chat" else "workflow"
 
         # Create graph initialization parameters
         graph_init_params = GraphInitParams(
             tenant_id="test_tenant",
             app_id="test_app",
-            workflow_type=workflow_type,
             workflow_id="test_workflow",
             graph_config=graph_config,
             user_id="test_user",

@@ -16,7 +16,6 @@ from core.workflow.nodes.node_factory import DefaultNodeFactory
 from core.workflow.nodes.template_transform.template_transform_node import TemplateTransformNode
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 @pytest.mark.skip(
@@ -141,7 +140,6 @@ def test_run():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.CHAT,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",
@@ -370,7 +368,6 @@ def test_run_parallel():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.CHAT,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",
@@ -598,7 +595,6 @@ def test_iteration_run_in_parallel_mode():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.CHAT,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",
@@ -838,7 +834,6 @@ def test_iteration_run_error_handle():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.CHAT,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

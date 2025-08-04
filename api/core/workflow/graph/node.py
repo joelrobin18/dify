@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, Union
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.workflow.enums import NodeExecutionType, NodeState
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 from .base_entities import BaseNodeData, RetryConfig
 
@@ -34,7 +33,6 @@ class Node:
         self.id = id
         self.tenant_id = graph_init_params.tenant_id
         self.app_id = graph_init_params.app_id
-        self.workflow_type = WorkflowType(graph_init_params.workflow_type)
         self.workflow_id = graph_init_params.workflow_id
         self.graph_config = graph_init_params.graph_config
         self.user_id = graph_init_params.user_id

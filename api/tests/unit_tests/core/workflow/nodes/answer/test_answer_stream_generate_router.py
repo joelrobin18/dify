@@ -9,7 +9,6 @@ from core.workflow.nodes.answer.answer_stream_generate_router import AnswerStrea
 from core.workflow.nodes.node_factory import DefaultNodeFactory
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 @pytest.mark.skip(reason="Test depends on old graph engine attributes (node_id_config_mapping, reverse_edge_mapping)")
@@ -114,7 +113,6 @@ def test_init():
     init_params = GraphInitParams(
         tenant_id="1",
         app_id="1",
-        workflow_type=WorkflowType.WORKFLOW,
         workflow_id="1",
         graph_config=graph_config,
         user_id="1",

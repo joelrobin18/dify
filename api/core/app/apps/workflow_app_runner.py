@@ -30,7 +30,7 @@ from core.app.entities.queue_entities import (
     QueueWorkflowSucceededEvent,
 )
 from core.workflow.entities import GraphInitParams, GraphRuntimeState, VariablePool
-from core.workflow.enums import WorkflowNodeExecutionMetadataKey, WorkflowType
+from core.workflow.enums import WorkflowNodeExecutionMetadataKey
 from core.workflow.events import (
     AgentLogEvent,
     GraphEngineEvent,
@@ -105,7 +105,6 @@ class WorkflowBasedAppRunner:
         graph_init_params = GraphInitParams(
             tenant_id=tenant_id or "",
             app_id=self._app_id,
-            workflow_type=WorkflowType.WORKFLOW.value,
             workflow_id=workflow_id,
             graph_config=graph_config,
             user_id="",
@@ -180,7 +179,6 @@ class WorkflowBasedAppRunner:
         graph_init_params = GraphInitParams(
             tenant_id=workflow.tenant_id,
             app_id=self._app_id,
-            workflow_type=WorkflowType.WORKFLOW.value,
             workflow_id=workflow.id,
             graph_config=graph_config,
             user_id="",
@@ -296,7 +294,6 @@ class WorkflowBasedAppRunner:
         graph_init_params = GraphInitParams(
             tenant_id=workflow.tenant_id,
             app_id=self._app_id,
-            workflow_type=WorkflowType.WORKFLOW.value,
             workflow_id=workflow.id,
             graph_config=graph_config,
             user_id="",

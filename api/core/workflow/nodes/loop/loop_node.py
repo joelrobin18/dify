@@ -96,7 +96,6 @@ class LoopNode(Node):
         graph_init_params = GraphInitParams(
             tenant_id=self.tenant_id,
             app_id=self.app_id,
-            workflow_type=self.workflow_type.value,
             workflow_id=self.workflow_id,
             graph_config=self.graph_config,
             user_id=self.user_id,
