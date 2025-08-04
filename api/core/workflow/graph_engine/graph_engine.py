@@ -27,11 +27,10 @@ from core.workflow.events import (
     NodeRunSucceededEvent,
 )
 from core.workflow.graph import Edge, Graph, Node
-from core.workflow.nodes.base.template import Template
 from models.enums import UserFrom
 
 from .output_registry import OutputRegistry
-from .response_coordinator import ResponseStreamCoordinator
+from .response_coordinator import ResponseSession, ResponseStreamCoordinator
 from .worker import Worker
 
 
@@ -275,9 +274,8 @@ class GraphEngine:
             event: Event to process
         """
         # First, let RSC track execution IDs and types if needed
-        if hasattr(event, "node_id") and hasattr(event, "id"):
+        if isinstance(event, GraphBaseNodeEvent):
             self.response_coordinator._node_execution_ids[event.node_id] = event.id
-        if hasattr(event, "node_id") and hasattr(event, "node_type"):
             self.response_coordinator._node_types[event.node_id] = event.node_type
 
         # Check if RSC wants to intercept this event
@@ -321,7 +319,6 @@ class GraphEngine:
                     active_session = self.response_coordinator.get_active_session()
                     if not active_session or active_session.node_id != node_id:
                         # No active session for this node, create one
-                        from core.workflow.graph_engine.response_coordinator import ResponseSession
 
                         # Get the template for this response node
                         node = self.graph.nodes[node_id]
@@ -420,7 +417,6 @@ class GraphEngine:
                     response_node = self.graph.nodes[response_node_id]
                     if response_node._execution_type == NodeExecutionType.RESPONSE:
                         # Start a streaming session for this response node immediately
-                        from core.workflow.graph_engine.response_coordinator import ResponseSession
 
                         # Store the node type but not the execution ID (will be set when node actually runs)
                         if response_node_id not in self.response_coordinator._node_types:
@@ -455,7 +451,6 @@ class GraphEngine:
                 target_node = self.graph.nodes[target_node_id]
                 if target_node._execution_type == NodeExecutionType.RESPONSE:
                     # Start a streaming session for this response node immediately
-                    from core.workflow.graph_engine.response_coordinator import ResponseSession
 
                     # Store the node type but not the execution ID (will be set when node actually runs)
                     if target_node_id not in self.response_coordinator._node_types:
@@ -654,18 +649,10 @@ class GraphEngine:
             Template instance
         """
 
-        # Check if this is an End node
-        if node.type_ == NodeType.END:
-            from core.workflow.nodes.end.end_node import EndNode
+        from core.workflow.nodes.answer.answer_node import AnswerNode
+        from core.workflow.nodes.end.end_node import EndNode
 
-            if isinstance(node, EndNode):
-                return node.get_streaming_template()
-        # Check if this is an Answer node
-        elif node.type_ == NodeType.ANSWER:
-            from core.workflow.nodes.answer.answer_node import AnswerNode
-
-            if isinstance(node, AnswerNode):
-                # Create template from answer node data
-                return Template.from_answer_template(node._node_data.answer)
+        if isinstance(node, EndNode | AnswerNode):
+            return node.get_streaming_template()
 
         raise ValueError(f"Unsupported response node type: {node.type_}")
