@@ -297,12 +297,7 @@ def test_handle_node_execution_start(workflow_cycle_manager, mock_workflow_execu
     event.node_execution_id = "test-node-execution-id"
     event.node_id = "test-node-id"
     event.node_type = NodeType.LLM
-
-    # Create node_data as a separate mock
-    node_data = MagicMock()
-    node_data.title = "Test Node"
-    event.node_data = node_data
-
+    event.node_title = "Test Node"
     event.predecessor_node_id = "test-predecessor-node-id"
     event.node_run_index = 1
     event.parallel_mode_run_id = "test-parallel-mode-run-id"

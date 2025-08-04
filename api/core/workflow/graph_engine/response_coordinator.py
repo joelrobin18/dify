@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Optional
 
-from core.workflow.events import GraphEngineEvent, NodeRunStreamChunkEvent, NodeRunSucceededEvent
+from core.workflow.events import GraphBaseNodeEvent, GraphEngineEvent, NodeRunStreamChunkEvent, NodeRunSucceededEvent
 from core.workflow.graph_engine.output_registry import OutputRegistry
-from core.workflow.nodes.base.template import Template
+from core.workflow.nodes.base.template import Template, TextSegment, VariableSegment
 
 if TYPE_CHECKING:
     from core.workflow.graph import Graph
@@ -92,7 +92,7 @@ class ResponseStreamCoordinator:
             if self.active_session is None:
                 self.active_session = session
 
-    def on_variable_update(self, selector: str) -> list[dict[str, Any]]:
+    def on_variable_update(self, selector: str) -> list[GraphEngineEvent]:
         """
         Handle variable updates from node outputs.
 
@@ -102,6 +102,7 @@ class ResponseStreamCoordinator:
         Returns:
             List of streaming events to be emitted
         """
+        _ = selector  # Mark as intentionally unused
         with self.lock:
             if self.active_session:
                 return self.try_flush()
@@ -120,9 +121,9 @@ class ResponseStreamCoordinator:
         """
         with self.lock:
             # Store node execution IDs and types for tracking
-            if hasattr(event, "node_id") and hasattr(event, "id"):
+            # Only GraphBaseNodeEvent instances have these attributes
+            if isinstance(event, GraphBaseNodeEvent):
                 self._node_execution_ids[event.node_id] = event.id
-            if hasattr(event, "node_id") and hasattr(event, "node_type"):
                 self._node_types[event.node_id] = event.node_type
 
             # Only process if we have an active session for this response node
@@ -155,9 +156,7 @@ class ResponseStreamCoordinator:
 
             from uuid import uuid4
 
-            from core.workflow.nodes.base.template import VariableSegment
-
-            events = []
+            events: list[GraphEngineEvent] = []
             template = self.active_session.template
             response_node_id = self.active_session.node_id
 
@@ -169,24 +168,25 @@ class ResponseStreamCoordinator:
                 for seg_idx in sorted(self.active_session.pending_text_segments):
                     if seg_idx < len(template.segments) and seg_idx not in self.active_session.streamed_segments:
                         segment = template.segments[seg_idx]
-                        if hasattr(segment, "text"):  # TextSegment
+                        if isinstance(segment, TextSegment):
                             response_node_type = self._node_types.get(response_node_id)
                             if response_node_type is None and self.graph and response_node_id in self.graph.nodes:
                                 response_node_type = self.graph.nodes[response_node_id].type_
 
-                            events.append(
-                                NodeRunStreamChunkEvent(
-                                    id=response_node_exec_id,
-                                    node_id=response_node_id,
-                                    node_type=response_node_type,
-                                    selector=[response_node_id, "output"],
-                                    chunk=segment.text,
-                                    is_final=False,
-                                    # Legacy fields
-                                    chunk_content=segment.text,
-                                    from_variable_selector=[response_node_id, "output"],
+                            if response_node_type is not None:
+                                events.append(
+                                    NodeRunStreamChunkEvent(
+                                        id=response_node_exec_id,
+                                        node_id=response_node_id,
+                                        node_type=response_node_type,
+                                        selector=[response_node_id, "output"],
+                                        chunk=segment.text,
+                                        is_final=False,
+                                        # Legacy fields
+                                        chunk_content=segment.text,
+                                        from_variable_selector=[response_node_id, "output"],
+                                    )
                                 )
-                            )
                             self.active_session.streamed_segments.add(seg_idx)
                 self.active_session.pending_text_segments.clear()
 
@@ -214,19 +214,20 @@ class ResponseStreamCoordinator:
                         while self.registry.has_unread(segment.selector):
                             chunk = self.registry.pop_chunk(segment.selector)
                             if chunk:
-                                events.append(
-                                    NodeRunStreamChunkEvent(
-                                        id=source_exec_id,
-                                        node_id=source_node_id,
-                                        node_type=source_node_type,
-                                        selector=segment.selector,
-                                        chunk=chunk,
-                                        is_final=False,
-                                        # Legacy fields
-                                        chunk_content=chunk,
-                                        from_variable_selector=segment.selector,
+                                if source_node_type is not None:
+                                    events.append(
+                                        NodeRunStreamChunkEvent(
+                                            id=source_exec_id,
+                                            node_id=source_node_id,
+                                            node_type=source_node_type,
+                                            selector=segment.selector,
+                                            chunk=chunk,
+                                            is_final=False,
+                                            # Legacy fields
+                                            chunk_content=chunk,
+                                            from_variable_selector=list(segment.selector),
+                                        )
                                     )
-                                )
 
                         # If stream is closed, mark segment as processed
                         if self.registry.stream_closed(segment.selector):
@@ -245,25 +246,26 @@ class ResponseStreamCoordinator:
                                 source_node_type = self.graph.nodes[source_node_id].type_
 
                             # Create a stream chunk event with the source node's ID
-                            events.append(
-                                NodeRunStreamChunkEvent(
-                                    id=source_exec_id,
-                                    node_id=source_node_id,
-                                    node_type=source_node_type,
-                                    selector=segment.selector,
-                                    chunk=str(value),
-                                    is_final=True,
-                                    # Legacy fields
-                                    chunk_content=str(value),
-                                    from_variable_selector=segment.selector,
+                            if source_node_type is not None:
+                                events.append(
+                                    NodeRunStreamChunkEvent(
+                                        id=source_exec_id,
+                                        node_id=source_node_id,
+                                        node_type=source_node_type,
+                                        selector=segment.selector,
+                                        chunk=str(value),
+                                        is_final=True,
+                                        # Legacy fields
+                                        chunk_content=str(value),
+                                        from_variable_selector=list(segment.selector),
+                                    )
                                 )
-                            )
                             self.active_session.streamed_segments.add(i)
                         else:
                             # Variable not ready yet, don't process further variable segments
                             # but we may have text segments to defer
                             pass
-                else:
+                elif isinstance(segment, TextSegment):
                     # Text segment - this is from the response node itself
                     # We need the response node's execution ID for this
                     if response_node_exec_id is None:
@@ -278,19 +280,20 @@ class ResponseStreamCoordinator:
                     if response_node_type is None and self.graph and response_node_id in self.graph.nodes:
                         response_node_type = self.graph.nodes[response_node_id].type_
 
-                    events.append(
-                        NodeRunStreamChunkEvent(
-                            id=response_node_exec_id,
-                            node_id=response_node_id,
-                            node_type=response_node_type,
-                            selector=[response_node_id, "output"],
-                            chunk=segment.text,
-                            is_final=False,
-                            # Legacy fields
-                            chunk_content=segment.text,
-                            from_variable_selector=[response_node_id, "output"],
+                    if response_node_type is not None:
+                        events.append(
+                            NodeRunStreamChunkEvent(
+                                id=response_node_exec_id,
+                                node_id=response_node_id,
+                                node_type=response_node_type,
+                                selector=[response_node_id, "output"],
+                                chunk=segment.text,
+                                is_final=False,
+                                # Legacy fields
+                                chunk_content=segment.text,
+                                from_variable_selector=[response_node_id, "output"],
+                            )
                         )
-                    )
                     self.active_session.streamed_segments.add(i)
 
             return events
