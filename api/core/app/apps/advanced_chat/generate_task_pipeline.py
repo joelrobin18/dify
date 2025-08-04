@@ -64,8 +64,8 @@ from core.app.task_pipeline.message_cycle_manager import MessageCycleManager
 from core.base.tts import AppGeneratorTTSPublisher, AudioTrunk
 from core.model_runtime.entities.llm_entities import LLMUsage
 from core.ops.ops_trace_manager import TraceQueueManager
-from core.workflow.entities.workflow_execution import WorkflowExecutionStatus, WorkflowType
-from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
+from core.workflow.entities import GraphRuntimeState
+from core.workflow.enums import WorkflowExecutionStatus, WorkflowType
 from core.workflow.nodes import NodeType
 from core.workflow.repositories.draft_variable_repository import DraftVariableSaverFactory
 from core.workflow.repositories.workflow_execution_repository import WorkflowExecutionRepository
@@ -568,7 +568,7 @@ class AdvancedChatAppGenerateTaskPipeline:
             )
 
         yield workflow_finish_resp
-        self._base_task_pipeline._queue_manager.publish(QueueAdvancedChatMessageEndEvent(), PublishFrom.TASK_PIPELINE)
+        self._base_task_pipeline.queue_manager.publish(QueueAdvancedChatMessageEndEvent(), PublishFrom.TASK_PIPELINE)
 
     def _handle_workflow_partial_success_event(
         self,
@@ -600,7 +600,7 @@ class AdvancedChatAppGenerateTaskPipeline:
             )
 
         yield workflow_finish_resp
-        self._base_task_pipeline._queue_manager.publish(QueueAdvancedChatMessageEndEvent(), PublishFrom.TASK_PIPELINE)
+        self._base_task_pipeline.queue_manager.publish(QueueAdvancedChatMessageEndEvent(), PublishFrom.TASK_PIPELINE)
 
     def _handle_workflow_failed_event(
         self,
@@ -845,7 +845,7 @@ class AdvancedChatAppGenerateTaskPipeline:
         # Initialize graph runtime state
         graph_runtime_state: Optional[GraphRuntimeState] = None
 
-        for queue_message in self._base_task_pipeline._queue_manager.listen():
+        for queue_message in self._base_task_pipeline.queue_manager.listen():
             event = queue_message.event
 
             match event:
@@ -959,11 +959,11 @@ class AdvancedChatAppGenerateTaskPipeline:
         if self._base_task_pipeline._output_moderation_handler:
             if self._base_task_pipeline._output_moderation_handler.should_direct_output():
                 self._task_state.answer = self._base_task_pipeline._output_moderation_handler.get_final_output()
-                self._base_task_pipeline._queue_manager.publish(
+                self._base_task_pipeline.queue_manager.publish(
                     QueueTextChunkEvent(text=self._task_state.answer), PublishFrom.TASK_PIPELINE
                 )
 
-                self._base_task_pipeline._queue_manager.publish(
+                self._base_task_pipeline.queue_manager.publish(
                     QueueStopEvent(stopped_by=QueueStopEvent.StopBy.OUTPUT_MODERATION), PublishFrom.TASK_PIPELINE
                 )
                 return True

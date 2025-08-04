@@ -6,12 +6,10 @@ from unittest.mock import MagicMock, patch
 
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.llm_generator.output_parser.structured_output import _parse_structured_output
-from core.workflow.entities.variable_pool import VariablePool
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionStatus
-from core.workflow.graph_engine.entities.graph import Graph
-from core.workflow.graph_engine.entities.graph_init_params import GraphInitParams
-from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
-from core.workflow.nodes.event import RunCompletedEvent
+from core.workflow.entities import GraphInitParams, GraphRuntimeState, VariablePool
+from core.workflow.enums import WorkflowNodeExecutionStatus
+from core.workflow.events import NodeRunCompletedEvent
+from core.workflow.graph import Graph
 from core.workflow.nodes.llm.node import LLMNode
 from core.workflow.system_variable import SystemVariable
 from extensions.ext_database import db
@@ -173,7 +171,7 @@ def test_execute_llm():
         assert isinstance(result, Generator)
 
         for item in result:
-            if isinstance(item, RunCompletedEvent):
+            if isinstance(item, NodeRunCompletedEvent):
                 if item.run_result.status != WorkflowNodeExecutionStatus.SUCCEEDED:
                     print(f"Error: {item.run_result.error}")
                     print(f"Error type: {item.run_result.error_type}")
@@ -284,7 +282,7 @@ def test_execute_llm_with_jinja2():
         result = node._run()
 
         for item in result:
-            if isinstance(item, RunCompletedEvent):
+            if isinstance(item, NodeRunCompletedEvent):
                 assert item.run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
                 assert item.run_result.process_data is not None
                 assert "sunny" in json.dumps(item.run_result.process_data)

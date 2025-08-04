@@ -7,11 +7,10 @@ from pydantic import BaseModel
 
 from core.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk
 from core.rag.entities.citation_metadata import RetrievalSourceMetadata
-from core.workflow.entities.node_entities import AgentNodeStrategyInit
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionMetadataKey
-from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
+from core.workflow.entities import GraphRuntimeState
+from core.workflow.enums import WorkflowNodeExecutionMetadataKey
+from core.workflow.events import AgentNodeStrategyInit
 from core.workflow.nodes import NodeType
-from core.workflow.nodes.base import BaseNodeData
 
 
 class QueueEvent(StrEnum):
@@ -80,7 +79,6 @@ class QueueIterationStartEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -108,7 +106,6 @@ class QueueIterationNextEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -134,7 +131,6 @@ class QueueIterationCompletedEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -163,7 +159,6 @@ class QueueLoopStartEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -191,7 +186,6 @@ class QueueLoopNextEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -217,7 +211,6 @@ class QueueLoopCompletedEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -364,26 +357,23 @@ class QueueNodeStartedEvent(AppQueueEvent):
 
     node_execution_id: str
     node_id: str
+    node_title: str
     node_type: NodeType
-    node_data: BaseNodeData
     node_run_index: int = 1
     predecessor_node_id: Optional[str] = None
     parallel_id: Optional[str] = None
-    """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
-    """parallel start node id if node is in parallel"""
     parent_parallel_id: Optional[str] = None
-    """parent parallel id if node is in parallel"""
     parent_parallel_start_node_id: Optional[str] = None
-    """parent parallel start node id if node is in parallel"""
     in_iteration_id: Optional[str] = None
-    """iteration id if node is in iteration"""
     in_loop_id: Optional[str] = None
-    """loop id if node is in loop"""
     start_at: datetime
     parallel_mode_run_id: Optional[str] = None
-    """iteratoin run in parallel mode run id"""
     agent_strategy: Optional[AgentNodeStrategyInit] = None
+
+    # FIXME(-LAN-): only for ToolNode, need to refactor
+    provider_type: str  # should be a core.tools.entities.tool_entities.ToolProviderType
+    provider_id: str
 
 
 class QueueNodeSucceededEvent(AppQueueEvent):
@@ -396,7 +386,6 @@ class QueueNodeSucceededEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -464,7 +453,6 @@ class QueueNodeInIterationFailedEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -497,7 +485,6 @@ class QueueNodeInLoopFailedEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -530,7 +517,6 @@ class QueueNodeExceptionEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None
@@ -563,7 +549,6 @@ class QueueNodeFailedEvent(AppQueueEvent):
     node_execution_id: str
     node_id: str
     node_type: NodeType
-    node_data: BaseNodeData
     parallel_id: Optional[str] = None
     """parallel id if node is in parallel"""
     parallel_start_node_id: Optional[str] = None

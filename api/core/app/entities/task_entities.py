@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.model_runtime.entities.llm_entities import LLMResult, LLMUsage
 from core.model_runtime.utils.encoders import jsonable_encoder
 from core.rag.entities.citation_metadata import RetrievalSourceMetadata
-from core.workflow.entities.node_entities import AgentNodeStrategyInit
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
+from core.workflow.enums import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
+from core.workflow.events import AgentNodeStrategyInit
 
 
 class AnnotationReplyAccount(BaseModel):
@@ -501,7 +501,6 @@ class IterationNodeStartStreamResponse(StreamResponse):
         id: str
         node_id: str
         node_type: str
-        title: str
         created_at: int
         extras: dict = {}
         metadata: Mapping = {}
@@ -527,7 +526,6 @@ class IterationNodeNextStreamResponse(StreamResponse):
         id: str
         node_id: str
         node_type: str
-        title: str
         index: int
         created_at: int
         pre_iteration_output: Optional[Any] = None
@@ -555,7 +553,6 @@ class IterationNodeCompletedStreamResponse(StreamResponse):
         id: str
         node_id: str
         node_type: str
-        title: str
         outputs: Optional[Mapping] = None
         created_at: int
         extras: Optional[dict] = None
@@ -588,7 +585,6 @@ class LoopNodeStartStreamResponse(StreamResponse):
         id: str
         node_id: str
         node_type: str
-        title: str
         created_at: int
         extras: dict = {}
         metadata: Mapping = {}
@@ -614,7 +610,6 @@ class LoopNodeNextStreamResponse(StreamResponse):
         id: str
         node_id: str
         node_type: str
-        title: str
         index: int
         created_at: int
         pre_loop_output: Optional[Any] = None
@@ -642,7 +637,6 @@ class LoopNodeCompletedStreamResponse(StreamResponse):
         id: str
         node_id: str
         node_type: str
-        title: str
         outputs: Optional[Mapping] = None
         created_at: int
         extras: Optional[dict] = None

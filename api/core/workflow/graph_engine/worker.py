@@ -1,0 +1,191 @@
+"""
+Worker - Thread implementation for queue-based node execution
+
+Workers pull node IDs from the ready_queue, execute nodes, and push events
+to the event_queue for the dispatcher to process.
+"""
+
+import queue
+import threading
+from datetime import datetime
+from uuid import uuid4
+
+from core.workflow.enums import NodeType
+from core.workflow.events import (
+    GraphEngineEvent,
+    NodeRunCompletedEvent,
+    NodeRunFailedEvent,
+    NodeRunStartedEvent,
+    NodeRunSucceededEvent,
+)
+from core.workflow.graph.graph import Graph, Node
+from libs.datetime_utils import naive_utc_now
+
+
+class Worker(threading.Thread):
+    """
+    Worker thread that executes nodes from the ready queue.
+
+    Workers continuously pull node IDs from the ready_queue, execute the
+    corresponding nodes, and push the resulting events to the event_queue
+    for the dispatcher to process.
+    """
+
+    def __init__(
+        self,
+        ready_queue: queue.Queue[str],
+        event_queue: queue.Queue[GraphEngineEvent],
+        graph: Graph,
+        worker_id: int = 0,
+    ) -> None:
+        """
+        Initialize worker thread.
+
+        Args:
+            ready_queue: Queue containing node IDs ready for execution
+            event_queue: Queue for pushing execution events
+            graph: Graph containing nodes to execute
+            worker_id: Unique identifier for this worker
+        """
+        super().__init__(name=f"GraphWorker-{worker_id}", daemon=True)
+        self.ready_queue = ready_queue
+        self.event_queue = event_queue
+        self.graph = graph
+        self.worker_id = worker_id
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        """Signal the worker to stop processing."""
+        self._stop_event.set()
+
+    def run(self) -> None:
+        """
+        Main worker loop.
+
+        Continuously pulls node IDs from ready_queue, executes them,
+        and pushes events to event_queue until stopped.
+        """
+        while not self._stop_event.is_set():
+            try:
+                # Try to get a node ID from the ready queue (with timeout)
+                try:
+                    node_id = self.ready_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                # Get the node from the graph
+                node = self.graph.get_node(node_id)
+                if node is None:
+                    error_event = NodeRunFailedEvent(
+                        id=str(uuid4()),
+                        node_id=node_id,
+                        node_type=NodeType.CODE,  # Default type
+                        parallel_id=None,
+                        in_iteration_id=None,
+                        error=f"Node {node_id} not found in graph",
+                        start_at=datetime.now(),
+                    )
+                    self.event_queue.put(error_event)
+                    self.ready_queue.task_done()
+                    continue
+
+                # Execute the node
+                self._execute_node(node)
+
+                # Mark task as done
+                self.ready_queue.task_done()
+
+            except Exception as e:
+                # Handle unexpected errors
+                try:
+                    error_event = NodeRunFailedEvent(
+                        id=str(uuid4()),
+                        node_id="unknown",
+                        node_type=NodeType.CODE,
+                        parallel_id=None,
+                        in_iteration_id=None,
+                        error=str(e),
+                        start_at=datetime.now(),
+                    )
+                    self.event_queue.put(error_event)
+                except Exception:
+                    # If we can't even create an error event, just continue
+                    pass
+
+    def _execute_node(self, node: Node) -> None:
+        """
+        Execute a single node and handle its events.
+
+        Args:
+            node: The node instance to execute
+        """
+        # Generate a single node execution ID to use for all events
+        node_execution_id = str(uuid4())
+
+        try:
+            # Create and push start event with required fields
+            start_at = naive_utc_now()
+            start_event = NodeRunStartedEvent(
+                id=node_execution_id,  # Required: node execution id
+                node_id=node.id,
+                node_type=node.type_,
+                node_title=node.title,
+                parallel_id=None,
+                in_iteration_id=None,
+                start_at=start_at,
+                node_run_index=0,
+            )
+
+            # === FIXME(-LAN-): shouldn't access private _node_data here, need to refactor
+            from core.workflow.nodes.tool.tool_node import ToolNode
+
+            if isinstance(node, ToolNode):
+                start_event.provider_id = node._node_data.provider_id
+                start_event.provider_type = node._node_data.provider_type.value
+            # ===
+
+            self.event_queue.put(start_event)
+
+            # Execute the node
+            # Call the node's _run method (internal execution)
+            node_events = node.run()
+
+            # Process node events and extract run result
+            node_run_result = None
+
+            for event in node_events:
+                # Forward event to dispatcher immediately for streaming
+                self.event_queue.put(event)
+
+                # Check if this is the run completed event
+                if isinstance(event, NodeRunCompletedEvent) and node_run_result is None:
+                    node_run_result = event.run_result
+
+            # Ensure we got a run result
+            if node_run_result is None:
+                raise RuntimeError(f"Node {node.id} execution completed without a RunCompletedEvent")
+
+            # Create and push success event
+            success_event = NodeRunSucceededEvent(
+                id=node_execution_id,  # Use same node execution id
+                node_id=node.id,
+                node_type=node.type_,
+                parallel_id=None,
+                in_iteration_id=None,
+                start_at=start_at,
+                node_run_result=node_run_result,
+            )
+            self.event_queue.put(success_event)
+
+        except Exception as e:
+            # Create and push failure event
+            failure_event = NodeRunFailedEvent(
+                id=node_execution_id,  # Use same node execution id
+                node_id=node.id,
+                node_type=node.type_,
+                parallel_id=None,
+                in_iteration_id=None,
+                error=str(e),  # Convert exception to string
+                start_at=datetime.now(),
+            )
+            self.event_queue.put(failure_event)

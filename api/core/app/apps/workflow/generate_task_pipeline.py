@@ -2,7 +2,7 @@ import logging
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from core.app.entities.app_invoke_entities import (
     WorkflowAppGenerateEntity,
 )
 from core.app.entities.queue_entities import (
+    AppQueueEvent,
     MessageQueueMessage,
     QueueAgentLogEvent,
     QueueErrorEvent,
@@ -57,8 +58,8 @@ from core.app.entities.task_entities import (
 from core.app.task_pipeline.based_generate_task_pipeline import BasedGenerateTaskPipeline
 from core.base.tts import AppGeneratorTTSPublisher, AudioTrunk
 from core.ops.ops_trace_manager import TraceQueueManager
-from core.workflow.entities.workflow_execution import WorkflowExecution, WorkflowExecutionStatus, WorkflowType
-from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
+from core.workflow.entities import GraphRuntimeState, WorkflowExecution
+from core.workflow.enums import WorkflowExecutionStatus, WorkflowType
 from core.workflow.repositories.draft_variable_repository import DraftVariableSaverFactory
 from core.workflow.repositories.workflow_execution_repository import WorkflowExecutionRepository
 from core.workflow.repositories.workflow_node_execution_repository import WorkflowNodeExecutionRepository
@@ -633,7 +634,7 @@ class WorkflowAppGenerateTaskPipeline:
 
     def _dispatch_event(
         self,
-        event: Any,
+        event: AppQueueEvent,
         *,
         graph_runtime_state: Optional[GraphRuntimeState] = None,
         tts_publisher: Optional[AppGeneratorTTSPublisher] = None,
@@ -711,7 +712,7 @@ class WorkflowAppGenerateTaskPipeline:
         # Initialize graph runtime state
         graph_runtime_state = None
 
-        for queue_message in self._base_task_pipeline._queue_manager.listen():
+        for queue_message in self._base_task_pipeline.queue_manager.listen():
             event = queue_message.event
 
             match event:

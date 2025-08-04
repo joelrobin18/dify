@@ -12,11 +12,15 @@ from core.app.entities.queue_entities import (
     QueueNodeStartedEvent,
     QueueNodeSucceededEvent,
 )
-from core.workflow.entities.workflow_execution import WorkflowExecution, WorkflowExecutionStatus, WorkflowType
-from core.workflow.entities.workflow_node_execution import (
+from core.workflow.entities import (
+    WorkflowExecution,
     WorkflowNodeExecution,
+)
+from core.workflow.enums import (
+    WorkflowExecutionStatus,
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
+    WorkflowType,
 )
 from core.workflow.nodes import NodeType
 from core.workflow.repositories.workflow_execution_repository import WorkflowExecutionRepository
@@ -317,7 +321,7 @@ def test_handle_node_execution_start(workflow_cycle_manager, mock_workflow_execu
     assert result.node_execution_id == event.node_execution_id
     assert result.node_id == event.node_id
     assert result.node_type == event.node_type
-    assert result.title == event.node_data.title
+    assert result.title == event.node_title
     assert result.status == WorkflowNodeExecutionStatus.RUNNING
 
     # Verify save was called

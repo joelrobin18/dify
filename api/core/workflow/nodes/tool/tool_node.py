@@ -1,5 +1,6 @@
 from collections.abc import Generator, Mapping, Sequence
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,15 +15,16 @@ from core.tools.tool_engine import ToolEngine
 from core.tools.utils.message_transformer import ToolFileMessageTransformer
 from core.variables.segments import ArrayAnySegment, ArrayFileSegment
 from core.variables.variables import ArrayAnyVariable
-from core.workflow.entities.node_entities import NodeRunResult
-from core.workflow.entities.variable_pool import VariablePool
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
-from core.workflow.enums import SystemVariableKey
-from core.workflow.nodes.base import BaseNode
-from core.workflow.nodes.base.entities import BaseNodeData, RetryConfig
-from core.workflow.nodes.enums import ErrorStrategy, NodeType
-from core.workflow.nodes.event import RunCompletedEvent, RunStreamChunkEvent
-from core.workflow.utils.variable_template_parser import VariableTemplateParser
+from core.workflow.enums import (
+    ErrorStrategy,
+    NodeType,
+    SystemVariableKey,
+    WorkflowNodeExecutionMetadataKey,
+    WorkflowNodeExecutionStatus,
+)
+from core.workflow.events import NodeRunCompletedEvent, NodeRunResult, NodeRunStreamChunkEvent
+from core.workflow.graph import BaseNodeData, Node, RetryConfig
+from core.workflow.nodes.base.variable_template_parser import VariableTemplateParser
 from extensions.ext_database import db
 from factories import file_factory
 from models import ToolFile
@@ -35,8 +37,11 @@ from .exc import (
     ToolParameterError,
 )
 
+if TYPE_CHECKING:
+    from core.workflow.entities import VariablePool
 
-class ToolNode(BaseNode):
+
+class ToolNode(Node):
     """
     Tool Node
     """
@@ -81,7 +86,7 @@ class ToolNode(BaseNode):
                 self.tenant_id, self.app_id, self.node_id, self._node_data, self.invoke_from, variable_pool
             )
         except ToolNodeError as e:
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.FAILED,
                     inputs={},
@@ -120,7 +125,7 @@ class ToolNode(BaseNode):
                 conversation_id=conversation_id.text if conversation_id else None,
             )
         except ToolNodeError as e:
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.FAILED,
                     inputs=parameters_for_log,
@@ -142,7 +147,7 @@ class ToolNode(BaseNode):
                 node_id=self.node_id,
             )
         except ToolInvokeError as e:
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.FAILED,
                     inputs=parameters_for_log,
@@ -152,7 +157,7 @@ class ToolNode(BaseNode):
                 )
             )
         except PluginInvokeError as e:
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.FAILED,
                     inputs=parameters_for_log,
@@ -165,7 +170,7 @@ class ToolNode(BaseNode):
                 )
             )
         except PluginDaemonClientSideError as e:
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.FAILED,
                     inputs=parameters_for_log,
@@ -179,7 +184,7 @@ class ToolNode(BaseNode):
         self,
         *,
         tool_parameters: Sequence[ToolParameter],
-        variable_pool: VariablePool,
+        variable_pool: "VariablePool",
         node_data: ToolNodeData,
         for_log: bool = False,
     ) -> dict[str, Any]:
@@ -220,7 +225,7 @@ class ToolNode(BaseNode):
 
         return result
 
-    def _fetch_files(self, variable_pool: VariablePool) -> list[File]:
+    def _fetch_files(self, variable_pool: "VariablePool") -> list[File]:
         variable = variable_pool.get(["sys", SystemVariableKey.FILES.value])
         assert isinstance(variable, ArrayAnyVariable | ArrayAnySegment)
         return list(variable.value) if variable else []
@@ -310,7 +315,18 @@ class ToolNode(BaseNode):
             elif message.type == ToolInvokeMessage.MessageType.TEXT:
                 assert isinstance(message.message, ToolInvokeMessage.TextMessage)
                 text += message.message.text
-                yield RunStreamChunkEvent(chunk_content=message.message.text, from_variable_selector=[node_id, "text"])
+                yield NodeRunStreamChunkEvent(
+                    id=str(uuid4()),
+                    node_id=node_id,
+                    node_type=self._node_type,
+                    # New spec-compliant fields
+                    selector=[node_id, "text"],
+                    chunk=message.message.text,
+                    is_final=False,
+                    # Legacy fields for compatibility
+                    chunk_content=message.message.text,
+                    from_variable_selector=[node_id, "text"],
+                )
             elif message.type == ToolInvokeMessage.MessageType.JSON:
                 assert isinstance(message.message, ToolInvokeMessage.JsonMessage)
                 # JSON message handling for tool node
@@ -347,7 +363,18 @@ class ToolNode(BaseNode):
 
                 stream_text = f"Link: {message.message.text}\n"
                 text += stream_text
-                yield RunStreamChunkEvent(chunk_content=stream_text, from_variable_selector=[node_id, "text"])
+                yield NodeRunStreamChunkEvent(
+                    id=str(uuid4()),
+                    node_id=node_id,
+                    node_type=self._node_type,
+                    # New spec-compliant fields
+                    selector=[node_id, "text"],
+                    chunk=stream_text,
+                    is_final=False,
+                    # Legacy fields for compatibility
+                    chunk_content=stream_text,
+                    from_variable_selector=[node_id, "text"],
+                )
             elif message.type == ToolInvokeMessage.MessageType.VARIABLE:
                 assert isinstance(message.message, ToolInvokeMessage.VariableMessage)
                 variable_name = message.message.variable_name
@@ -359,8 +386,17 @@ class ToolNode(BaseNode):
                         variables[variable_name] = ""
                     variables[variable_name] += variable_value
 
-                    yield RunStreamChunkEvent(
-                        chunk_content=variable_value, from_variable_selector=[node_id, variable_name]
+                    yield NodeRunStreamChunkEvent(
+                        id=str(uuid4()),
+                        node_id=node_id,
+                        node_type=self._node_type,
+                        # New spec-compliant fields
+                        selector=[node_id, variable_name],
+                        chunk=variable_value,
+                        is_final=False,
+                        # Legacy fields for compatibility
+                        chunk_content=variable_value,
+                        from_variable_selector=[node_id, variable_name],
                     )
                 else:
                     variables[variable_name] = variable_value
@@ -420,7 +456,37 @@ class ToolNode(BaseNode):
         else:
             json_output.append({"data": []})
 
-        yield RunCompletedEvent(
+        # Send final chunk events for all streamed outputs
+        # Final chunk for text stream
+        yield NodeRunStreamChunkEvent(
+            id=str(uuid4()),
+            node_id=self.node_id,
+            node_type=self._node_type,
+            # New spec-compliant fields
+            selector=[self.node_id, "text"],
+            chunk="",
+            is_final=True,
+            # Legacy fields for compatibility
+            chunk_content="",
+            from_variable_selector=[self.node_id, "text"],
+        )
+
+        # Final chunks for any streamed variables
+        for var_name in variables:
+            yield NodeRunStreamChunkEvent(
+                id=str(uuid4()),
+                node_id=self.node_id,
+                node_type=self._node_type,
+                # New spec-compliant fields
+                selector=[self.node_id, var_name],
+                chunk="",
+                is_final=True,
+                # Legacy fields for compatibility
+                chunk_content="",
+                from_variable_selector=[self.node_id, var_name],
+            )
+
+        yield NodeRunCompletedEvent(
             run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 outputs={"text": text, "files": ArrayFileSegment(value=files), "json": json_output, **variables},

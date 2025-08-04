@@ -11,40 +11,38 @@ from core.variables import (
     Segment,
     SegmentType,
 )
-from core.workflow.entities.node_entities import NodeRunResult
-from core.workflow.entities.workflow_node_execution import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
-from core.workflow.graph_engine.entities.event import (
+from core.workflow.enums import ErrorStrategy, NodeType, WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
+from core.workflow.events import (
     BaseGraphEvent,
-    BaseNodeEvent,
     BaseParallelBranchEvent,
+    GraphBaseNodeEvent,
     GraphRunFailedEvent,
     InNodeEvent,
     LoopRunFailedEvent,
     LoopRunNextEvent,
     LoopRunStartedEvent,
     LoopRunSucceededEvent,
+    NodeEvent,
+    NodeRunCompletedEvent,
     NodeRunFailedEvent,
+    NodeRunResult,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
 )
-from core.workflow.graph_engine.entities.graph import Graph
-from core.workflow.nodes.base import BaseNode
-from core.workflow.nodes.base.entities import BaseNodeData, RetryConfig
-from core.workflow.nodes.enums import ErrorStrategy, NodeType
-from core.workflow.nodes.event import NodeEvent, RunCompletedEvent
+from core.workflow.graph import BaseNodeData, Graph, Node, RetryConfig
 from core.workflow.nodes.loop.entities import LoopNodeData
 from core.workflow.utils.condition.processor import ConditionProcessor
 from factories.variable_factory import TypeMismatchError, build_segment_with_type
 
 if TYPE_CHECKING:
-    from core.workflow.entities.variable_pool import VariablePool
-    from core.workflow.graph_engine.graph_engine import GraphEngine
+    from core.workflow.entities import VariablePool
+    from core.workflow.graph_engine import GraphEngine
 
 logger = logging.getLogger(__name__)
 
 
-class LoopNode(BaseNode):
+class LoopNode(Node):
     """
     Loop Node.
     """
@@ -91,7 +89,28 @@ class LoopNode(BaseNode):
             raise ValueError(f"field start_node_id in loop {self.node_id} not found")
 
         # Initialize graph
-        loop_graph = Graph.init(graph_config=self.graph_config, root_node_id=self._node_data.start_node_id)
+        from core.workflow.entities import GraphInitParams
+        from core.workflow.nodes.node_factory import DefaultNodeFactory
+
+        # Create GraphInitParams from node attributes
+        graph_init_params = GraphInitParams(
+            tenant_id=self.tenant_id,
+            app_id=self.app_id,
+            workflow_type=self.workflow_type.value,
+            workflow_id=self.workflow_id,
+            graph_config=self.graph_config,
+            user_id=self.user_id,
+            user_from=self.user_from.value,
+            invoke_from=self.invoke_from.value,
+            call_depth=self.workflow_call_depth,
+        )
+
+        node_factory = DefaultNodeFactory(
+            graph_init_params=graph_init_params, graph_runtime_state=self.graph_runtime_state
+        )
+        loop_graph = Graph.init(
+            graph_config=self.graph_config, node_factory=node_factory, root_node_id=self._node_data.start_node_id
+        )
         if not loop_graph:
             raise ValueError("loop graph not found")
 
@@ -121,8 +140,8 @@ class LoopNode(BaseNode):
                 loop_variable_selectors[loop_variable.label] = variable_selector
                 inputs[loop_variable.label] = processed_segment.value
 
-        from core.workflow.graph_engine.entities.graph_runtime_state import GraphRuntimeState
-        from core.workflow.graph_engine.graph_engine import GraphEngine
+        from core.workflow.entities import GraphRuntimeState
+        from core.workflow.graph_engine import GraphEngine
 
         graph_runtime_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time.perf_counter())
 
@@ -221,7 +240,7 @@ class LoopNode(BaseNode):
                 },
             )
 
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.SUCCEEDED,
                     metadata={
@@ -254,7 +273,7 @@ class LoopNode(BaseNode):
                 error=str(e),
             )
 
-            yield RunCompletedEvent(
+            yield NodeRunCompletedEvent(
                 run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.FAILED,
                     error=str(e),
@@ -298,11 +317,11 @@ class LoopNode(BaseNode):
         check_break_result = False
 
         for event in rst:
-            if isinstance(event, (BaseNodeEvent | BaseParallelBranchEvent)) and not event.in_loop_id:
+            if isinstance(event, (GraphBaseNodeEvent | BaseParallelBranchEvent)) and not event.in_loop_id:
                 event.in_loop_id = self.node_id
 
             if (
-                isinstance(event, BaseNodeEvent)
+                isinstance(event, GraphBaseNodeEvent)
                 and event.node_type == NodeType.LOOP_START
                 and not isinstance(event, NodeRunStreamChunkEvent)
             ):
@@ -356,7 +375,7 @@ class LoopNode(BaseNode):
                         },
                         error=event.error,
                     )
-                    yield RunCompletedEvent(
+                    yield NodeRunCompletedEvent(
                         run_result=NodeRunResult(
                             status=WorkflowNodeExecutionStatus.FAILED,
                             error=event.error,
@@ -385,7 +404,7 @@ class LoopNode(BaseNode):
                     },
                     error=event.error,
                 )
-                yield RunCompletedEvent(
+                yield NodeRunCompletedEvent(
                     run_result=NodeRunResult(
                         status=WorkflowNodeExecutionStatus.FAILED,
                         error=event.error,
@@ -434,25 +453,22 @@ class LoopNode(BaseNode):
     def _handle_event_metadata(
         self,
         *,
-        event: BaseNodeEvent | InNodeEvent,
+        event: GraphBaseNodeEvent | InNodeEvent,
         iter_run_index: int,
-    ) -> NodeRunStartedEvent | BaseNodeEvent | InNodeEvent:
+    ) -> NodeRunStartedEvent | GraphBaseNodeEvent | InNodeEvent:
         """
         add iteration metadata to event.
         """
-        if not isinstance(event, BaseNodeEvent):
+        if not isinstance(event, GraphBaseNodeEvent):
             return event
-        if event.route_node_state.node_run_result:
-            metadata = event.route_node_state.node_run_result.metadata
-            if not metadata:
-                metadata = {}
-            if WorkflowNodeExecutionMetadataKey.LOOP_ID not in metadata:
-                metadata = {
-                    **metadata,
-                    WorkflowNodeExecutionMetadataKey.LOOP_ID: self.node_id,
-                    WorkflowNodeExecutionMetadataKey.LOOP_INDEX: iter_run_index,
-                }
-                event.route_node_state.node_run_result.metadata = metadata
+        metadata = event.node_run_result.metadata
+        if WorkflowNodeExecutionMetadataKey.LOOP_ID not in metadata:
+            metadata = {
+                **metadata,
+                WorkflowNodeExecutionMetadataKey.LOOP_ID: self.node_id,
+                WorkflowNodeExecutionMetadataKey.LOOP_INDEX: iter_run_index,
+            }
+            event.node_run_result.metadata = metadata
         return event
 
     @classmethod
@@ -469,12 +485,21 @@ class LoopNode(BaseNode):
         variable_mapping = {}
 
         # init graph
-        loop_graph = Graph.init(graph_config=graph_config, root_node_id=typed_node_data.start_node_id)
+        # Note: This is a classmethod without access to instance attributes
+        # We'll skip node factory for now since this appears to be for static analysis
+        # TODO: Refactor to properly handle node factory in classmethods
+        loop_graph = Graph.init(
+            graph_config=graph_config,
+            node_factory=None,  # type: ignore[arg-type]
+            root_node_id=typed_node_data.start_node_id,
+        )
 
         if not loop_graph:
             raise ValueError("loop graph not found")
 
-        for sub_node_id, sub_node_config in loop_graph.node_id_config_mapping.items():
+        # Get node configs from graph_config instead of non-existent node_id_config_mapping
+        node_configs = {node["id"]: node for node in graph_config.get("nodes", []) if "id" in node}
+        for sub_node_id, sub_node_config in node_configs.items():
             if sub_node_config.get("data", {}).get("loop_id") != node_id:
                 continue
 

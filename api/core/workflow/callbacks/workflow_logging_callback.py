@@ -1,7 +1,7 @@
 from typing import Optional
 
 from core.model_runtime.utils.encoders import jsonable_encoder
-from core.workflow.graph_engine.entities.event import (
+from core.workflow.events import (
     GraphEngineEvent,
     GraphRunFailedEvent,
     GraphRunPartialSucceededEvent,
@@ -81,83 +81,76 @@ class WorkflowLoggingCallback(WorkflowCallback):
         """
         self.print_text("\n[NodeRunStartedEvent]", color="yellow")
         self.print_text(f"Node ID: {event.node_id}", color="yellow")
-        self.print_text(f"Node Title: {event.node_data.title}", color="yellow")
+        self.print_text(f"Node Title: {event.node_title}", color="yellow")
         self.print_text(f"Type: {event.node_type.value}", color="yellow")
 
     def on_workflow_node_execute_succeeded(self, event: NodeRunSucceededEvent) -> None:
         """
         Workflow node execute succeeded
         """
-        route_node_state = event.route_node_state
+        # Direct access to event attributes instead of route_node_state
 
         self.print_text("\n[NodeRunSucceededEvent]", color="green")
         self.print_text(f"Node ID: {event.node_id}", color="green")
-        self.print_text(f"Node Title: {event.node_data.title}", color="green")
         self.print_text(f"Type: {event.node_type.value}", color="green")
 
-        if route_node_state.node_run_result:
-            node_run_result = route_node_state.node_run_result
-            self.print_text(
-                f"Inputs: {jsonable_encoder(node_run_result.inputs) if node_run_result.inputs else ''}",
-                color="green",
-            )
-            self.print_text(
-                f"Process Data: "
-                f"{jsonable_encoder(node_run_result.process_data) if node_run_result.process_data else ''}",
-                color="green",
-            )
-            self.print_text(
-                f"Outputs: {jsonable_encoder(node_run_result.outputs) if node_run_result.outputs else ''}",
-                color="green",
-            )
-            self.print_text(
-                f"Metadata: {jsonable_encoder(node_run_result.metadata) if node_run_result.metadata else ''}",
-                color="green",
-            )
+        node_run_result = event.node_run_result
+        self.print_text(
+            f"Inputs: {jsonable_encoder(node_run_result.inputs) if node_run_result.inputs else ''}",
+            color="green",
+        )
+        self.print_text(
+            f"Process Data: {jsonable_encoder(node_run_result.process_data) if node_run_result.process_data else ''}",
+            color="green",
+        )
+        self.print_text(
+            f"Outputs: {jsonable_encoder(node_run_result.outputs) if node_run_result.outputs else ''}",
+            color="green",
+        )
+        self.print_text(
+            f"Metadata: {jsonable_encoder(node_run_result.metadata) if node_run_result.metadata else ''}",
+            color="green",
+        )
 
     def on_workflow_node_execute_failed(self, event: NodeRunFailedEvent) -> None:
         """
         Workflow node execute failed
         """
-        route_node_state = event.route_node_state
+        # Direct access to event attributes instead of route_node_state
 
         self.print_text("\n[NodeRunFailedEvent]", color="red")
         self.print_text(f"Node ID: {event.node_id}", color="red")
-        self.print_text(f"Node Title: {event.node_data.title}", color="red")
         self.print_text(f"Type: {event.node_type.value}", color="red")
 
-        if route_node_state.node_run_result:
-            node_run_result = route_node_state.node_run_result
-            self.print_text(f"Error: {node_run_result.error}", color="red")
-            self.print_text(
-                f"Inputs: {jsonable_encoder(node_run_result.inputs) if node_run_result.inputs else ''}",
-                color="red",
-            )
-            self.print_text(
-                f"Process Data: "
-                f"{jsonable_encoder(node_run_result.process_data) if node_run_result.process_data else ''}",
-                color="red",
-            )
-            self.print_text(
-                f"Outputs: {jsonable_encoder(node_run_result.outputs) if node_run_result.outputs else ''}",
-                color="red",
-            )
+        node_run_result = event.node_run_result
+        self.print_text(f"Error: {node_run_result.error}", color="red")
+        self.print_text(
+            f"Inputs: {jsonable_encoder(node_run_result.inputs) if node_run_result.inputs else ''}",
+            color="red",
+        )
+        self.print_text(
+            f"Process Data: {jsonable_encoder(node_run_result.process_data) if node_run_result.process_data else ''}",
+            color="red",
+        )
+        self.print_text(
+            f"Outputs: {jsonable_encoder(node_run_result.outputs) if node_run_result.outputs else ''}",
+            color="red",
+        )
 
     def on_node_text_chunk(self, event: NodeRunStreamChunkEvent) -> None:
         """
         Publish text chunk
         """
-        route_node_state = event.route_node_state
-        if not self.current_node_id or self.current_node_id != route_node_state.node_id:
-            self.current_node_id = route_node_state.node_id
+        # Direct access to event attributes instead of route_node_state
+        if not self.current_node_id or self.current_node_id != event.node_id:
+            self.current_node_id = event.node_id
             self.print_text("\n[NodeRunStreamChunkEvent]")
-            self.print_text(f"Node ID: {route_node_state.node_id}")
+            self.print_text(f"Node ID: {event.node_id}")
 
-            node_run_result = route_node_state.node_run_result
-            if node_run_result:
-                self.print_text(
-                    f"Metadata: {jsonable_encoder(node_run_result.metadata) if node_run_result.metadata else ''}"
-                )
+            node_run_result = event.node_run_result
+            self.print_text(
+                f"Metadata: {jsonable_encoder(node_run_result.metadata) if node_run_result.metadata else ''}"
+            )
 
         self.print_text(event.chunk_content, color="pink", end="")
 
