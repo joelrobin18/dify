@@ -80,7 +80,6 @@ def create_test_graph_engine(graph_config: dict, user_inputs: dict | None = None
         system_variables=SystemVariable(
             user_id="test_user",
             files=[],
-            query=user_inputs.get("query", "") if user_inputs else "",
         ),
         user_inputs=user_inputs or {},
     )

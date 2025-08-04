@@ -296,6 +296,14 @@ class GraphEngine:
                     elif isinstance(event, NodeRunStreamChunkEvent):
                         # Streaming event was not relevant to response node, suppress it
                         intercept_handled = True
+            else:
+                # No active session - suppress stream events from non-response nodes
+                if isinstance(event, NodeRunStreamChunkEvent):
+                    # Check if this is from a response node itself
+                    node = self.graph.nodes[node_id]
+                    if node._execution_type != NodeExecutionType.RESPONSE:
+                        # Suppress stream events from non-response nodes when no session is active
+                        intercept_handled = True
 
         if not intercept_handled:
             with self._event_collector_lock:
