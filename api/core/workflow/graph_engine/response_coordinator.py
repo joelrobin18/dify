@@ -6,10 +6,12 @@ of responses based on upstream node outputs and constants.
 """
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
+from core.workflow.enums import NodeType
 from core.workflow.events import GraphBaseNodeEvent, GraphEngineEvent, NodeRunStreamChunkEvent, NodeRunSucceededEvent
 from core.workflow.graph_engine.output_registry import OutputRegistry
 from core.workflow.nodes.base.template import Template, TextSegment, VariableSegment
@@ -144,6 +146,149 @@ class ResponseStreamCoordinator:
 
             return None
 
+    def _get_node_type(self, node_id: str) -> Optional[NodeType]:
+        """Get node type from cache or graph."""
+        if node_type := self._node_types.get(node_id):
+            return cast(NodeType, node_type)
+
+        if self.graph and node_id in self.graph.nodes:
+            return cast(NodeType, self.graph.nodes[node_id].type_)
+
+        return None
+
+    def _create_stream_chunk_event(
+        self,
+        node_id: str,
+        node_type: NodeType,
+        execution_id: str,
+        selector: Sequence[str],
+        chunk: str,
+        is_final: bool = False,
+    ) -> NodeRunStreamChunkEvent:
+        """Create a stream chunk event with consistent structure."""
+        return NodeRunStreamChunkEvent(
+            id=execution_id,
+            node_id=node_id,
+            node_type=node_type,
+            selector=selector,
+            chunk=chunk,
+            is_final=is_final,
+            # Legacy fields
+            chunk_content=chunk,
+            from_variable_selector=list(selector),
+        )
+
+    def _process_pending_text_segments(
+        self, response_node_id: str, response_node_exec_id: str, template: Template
+    ) -> list[GraphEngineEvent]:
+        """Process any pending text segments."""
+        events: list[GraphEngineEvent] = []
+
+        if not (response_node_exec_id and self.active_session and self.active_session.pending_text_segments):
+            return events
+
+        response_node_type = self._get_node_type(response_node_id)
+        if not response_node_type:
+            return events
+
+        for seg_idx in sorted(self.active_session.pending_text_segments):
+            if seg_idx >= len(template.segments) or seg_idx in self.active_session.streamed_segments:
+                continue
+
+            segment = template.segments[seg_idx]
+            if isinstance(segment, TextSegment):
+                events.append(
+                    self._create_stream_chunk_event(
+                        node_id=response_node_id,
+                        node_type=response_node_type,
+                        execution_id=response_node_exec_id,
+                        selector=[response_node_id, "output"],
+                        chunk=segment.text,
+                        is_final=False,
+                    )
+                )
+                self.active_session.streamed_segments.add(seg_idx)
+
+        self.active_session.pending_text_segments.clear()
+        return events
+
+    def _process_variable_segment(self, segment: VariableSegment, segment_index: int) -> list[GraphEngineEvent]:
+        """Process a variable segment."""
+        from uuid import uuid4
+
+        events: list[GraphEngineEvent] = []
+        source_node_id = segment.selector[0]
+
+        if self.registry and self.registry.has_unread(segment.selector):
+            # Stream all available chunks
+            source_exec_id = self._node_execution_ids.get(source_node_id, str(uuid4()))
+            source_node_type = self._get_node_type(source_node_id)
+
+            if source_node_type:
+                while self.registry and self.registry.has_unread(segment.selector):
+                    if chunk := self.registry.pop_chunk(segment.selector):
+                        events.append(
+                            self._create_stream_chunk_event(
+                                node_id=source_node_id,
+                                node_type=source_node_type,
+                                execution_id=source_exec_id,
+                                selector=segment.selector,
+                                chunk=chunk,
+                                is_final=False,
+                            )
+                        )
+
+            if self.registry and self.registry.stream_closed(segment.selector) and self.active_session:
+                self.active_session.streamed_segments.add(segment_index)
+
+        elif self.registry and (value := self.registry.get_scalar(segment.selector)):
+            # Process scalar value
+            source_exec_id = self._node_execution_ids.get(source_node_id, str(uuid4()))
+            source_node_type = self._get_node_type(source_node_id)
+
+            if source_node_type:
+                events.append(
+                    self._create_stream_chunk_event(
+                        node_id=source_node_id,
+                        node_type=source_node_type,
+                        execution_id=source_exec_id,
+                        selector=segment.selector,
+                        chunk=str(value),
+                        is_final=True,
+                    )
+                )
+            if self.active_session:
+                self.active_session.streamed_segments.add(segment_index)
+
+        return events
+
+    def _process_text_segment(
+        self, segment: TextSegment, segment_index: int, response_node_id: str, response_node_exec_id: Optional[str]
+    ) -> tuple[list[GraphEngineEvent], bool]:
+        """Process a text segment. Returns (events, should_continue)."""
+        if not response_node_exec_id:
+            if self.active_session:
+                self.active_session.pending_text_segments.add(segment_index)
+            return [], False  # Stop processing to maintain order
+
+        response_node_type = self._get_node_type(response_node_id)
+        if response_node_type:
+            event = self._create_stream_chunk_event(
+                node_id=response_node_id,
+                node_type=response_node_type,
+                execution_id=response_node_exec_id,
+                selector=[response_node_id, "output"],
+                chunk=segment.text,
+                is_final=False,
+            )
+            if self.active_session:
+                self.active_session.streamed_segments.add(segment_index)
+            return [event], True
+
+        if self.active_session:
+            self.active_session.streamed_segments.add(segment_index)
+        return [], True
+
     def try_flush(self) -> list[GraphEngineEvent]:
         """Try to flush output from the active session.
 
@@ -151,150 +296,32 @@ class ResponseStreamCoordinator:
             List of events to be emitted
         """
         with self.lock:
-            if not self.active_session or not self.active_session.template or not self.registry:
+            if not (self.active_session and self.registry):
                 return []
 
-            from uuid import uuid4
-
-            events: list[GraphEngineEvent] = []
             template = self.active_session.template
             response_node_id = self.active_session.node_id
-
-            # Get the response node's execution ID
             response_node_exec_id = self._node_execution_ids.get(response_node_id)
 
-            # First, try to flush any pending text segments if we now have the execution ID
-            if response_node_exec_id and self.active_session.pending_text_segments:
-                for seg_idx in sorted(self.active_session.pending_text_segments):
-                    if seg_idx < len(template.segments) and seg_idx not in self.active_session.streamed_segments:
-                        segment = template.segments[seg_idx]
-                        if isinstance(segment, TextSegment):
-                            response_node_type = self._node_types.get(response_node_id)
-                            if response_node_type is None and self.graph and response_node_id in self.graph.nodes:
-                                response_node_type = self.graph.nodes[response_node_id].type_
+            # Process pending text segments first
+            events: list[GraphEngineEvent] = []
+            if response_node_exec_id:
+                events = self._process_pending_text_segments(response_node_id, response_node_exec_id, template)
 
-                            if response_node_type is not None:
-                                events.append(
-                                    NodeRunStreamChunkEvent(
-                                        id=response_node_exec_id,
-                                        node_id=response_node_id,
-                                        node_type=response_node_type,
-                                        selector=[response_node_id, "output"],
-                                        chunk=segment.text,
-                                        is_final=False,
-                                        # Legacy fields
-                                        chunk_content=segment.text,
-                                        from_variable_selector=[response_node_id, "output"],
-                                    )
-                                )
-                            self.active_session.streamed_segments.add(seg_idx)
-                self.active_session.pending_text_segments.clear()
-
-            # Process each segment in the template IN ORDER
-            # We must respect the template order, so if we can't stream a segment,
-            # we must stop and wait (not skip to later segments)
+            # Process each segment in order
             for i, segment in enumerate(template.segments):
-                # Skip already streamed segments
                 if i in self.active_session.streamed_segments:
                     continue
 
                 if isinstance(segment, VariableSegment):
-                    # First check for streaming data
-                    has_stream = self.registry.has_unread(segment.selector)
-
-                    if has_stream:
-                        # Stream all available chunks
-                        source_node_id = segment.selector[0]
-                        source_exec_id = self._node_execution_ids.get(source_node_id, str(uuid4()))
-                        source_node_type = self._node_types.get(source_node_id)
-
-                        if source_node_type is None and self.graph and source_node_id in self.graph.nodes:
-                            source_node_type = self.graph.nodes[source_node_id].type_
-
-                        while self.registry.has_unread(segment.selector):
-                            chunk = self.registry.pop_chunk(segment.selector)
-                            if chunk:
-                                if source_node_type is not None:
-                                    events.append(
-                                        NodeRunStreamChunkEvent(
-                                            id=source_exec_id,
-                                            node_id=source_node_id,
-                                            node_type=source_node_type,
-                                            selector=segment.selector,
-                                            chunk=chunk,
-                                            is_final=False,
-                                            # Legacy fields
-                                            chunk_content=chunk,
-                                            from_variable_selector=list(segment.selector),
-                                        )
-                                    )
-
-                        # If stream is closed, mark segment as processed
-                        if self.registry.stream_closed(segment.selector):
-                            self.active_session.streamed_segments.add(i)
-                    else:
-                        # No streaming data, check for scalar value
-                        value = self.registry.get_scalar(segment.selector)
-                        if value is not None:
-                            # Find the original node's execution ID and type
-                            source_node_id = segment.selector[0]
-                            source_exec_id = self._node_execution_ids.get(source_node_id, str(uuid4()))
-                            source_node_type = self._node_types.get(source_node_id)
-
-                            # If we don't have the node type cached, get it from the graph
-                            if source_node_type is None and self.graph and source_node_id in self.graph.nodes:
-                                source_node_type = self.graph.nodes[source_node_id].type_
-
-                            # Create a stream chunk event with the source node's ID
-                            if source_node_type is not None:
-                                events.append(
-                                    NodeRunStreamChunkEvent(
-                                        id=source_exec_id,
-                                        node_id=source_node_id,
-                                        node_type=source_node_type,
-                                        selector=segment.selector,
-                                        chunk=str(value),
-                                        is_final=True,
-                                        # Legacy fields
-                                        chunk_content=str(value),
-                                        from_variable_selector=list(segment.selector),
-                                    )
-                                )
-                            self.active_session.streamed_segments.add(i)
-                        else:
-                            # Variable not ready yet, don't process further variable segments
-                            # but we may have text segments to defer
-                            pass
+                    events.extend(self._process_variable_segment(segment, i))
                 elif isinstance(segment, TextSegment):
-                    # Text segment - this is from the response node itself
-                    # We need the response node's execution ID for this
-                    if response_node_exec_id is None:
-                        # Response node hasn't started yet, mark as pending
-                        self.active_session.pending_text_segments.add(i)
-                        # STOP processing further segments to maintain order
+                    segment_events, should_continue = self._process_text_segment(
+                        segment, i, response_node_id, response_node_exec_id
+                    )
+                    events.extend(segment_events)
+                    if not should_continue:
                         break
-
-                    response_node_type = self._node_types.get(response_node_id)
-
-                    # If we don't have the node type cached, get it from the graph
-                    if response_node_type is None and self.graph and response_node_id in self.graph.nodes:
-                        response_node_type = self.graph.nodes[response_node_id].type_
-
-                    if response_node_type is not None:
-                        events.append(
-                            NodeRunStreamChunkEvent(
-                                id=response_node_exec_id,
-                                node_id=response_node_id,
-                                node_type=response_node_type,
-                                selector=[response_node_id, "output"],
-                                chunk=segment.text,
-                                is_final=False,
-                                # Legacy fields
-                                chunk_content=segment.text,
-                                from_variable_selector=[response_node_id, "output"],
-                            )
-                        )
-                    self.active_session.streamed_segments.add(i)
 
             return events
 
