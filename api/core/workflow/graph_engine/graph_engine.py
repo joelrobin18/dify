@@ -8,12 +8,13 @@ for improved control and coordination of workflow execution.
 import queue
 import threading
 import time
+from collections import deque
 from collections.abc import Generator, Mapping
 from typing import Any, Optional
 
 from core.app.entities.app_invoke_entities import InvokeFrom
 from core.workflow.entities import GraphRuntimeState
-from core.workflow.enums import NodeState, NodeType
+from core.workflow.enums import NodeExecutionType, NodeState, NodeType
 from core.workflow.events import (
     GraphBaseNodeEvent,
     GraphEngineEvent,
@@ -25,13 +26,13 @@ from core.workflow.events import (
     NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
 )
-from core.workflow.graph import Graph
-from core.workflow.graph.edge import Edge
-from core.workflow.graph_engine.output_registry import OutputRegistry
-from core.workflow.graph_engine.response_coordinator import ResponseStreamCoordinator
-from core.workflow.graph_engine.worker import Worker
+from core.workflow.graph import Edge, Graph, Node
+from core.workflow.nodes.base.template import Template
 from models.enums import UserFrom
-from models.workflow import WorkflowType
+
+from .output_registry import OutputRegistry
+from .response_coordinator import ResponseStreamCoordinator
+from .worker import Worker
 
 
 class GraphEngine:
@@ -100,7 +101,7 @@ class GraphEngine:
 
         # Subsystems
         self.output_registry = OutputRegistry()
-        self.response_coordinator = ResponseStreamCoordinator()
+        self.response_coordinator = ResponseStreamCoordinator(registry=self.output_registry, graph=self.graph)
 
         # Worker threads (10 workers as specified)
         self.workers: list[Worker] = []
@@ -197,6 +198,12 @@ class GraphEngine:
             raise ValueError("No root node found in graph")
         root_node = self.graph.root_node
         root_node.state = NodeState.TAKEN
+
+        # Register all response nodes at startup
+        for node in self.graph.nodes.values():
+            if node._execution_type == NodeExecutionType.RESPONSE:
+                self.response_coordinator.register(node.id)
+
         self.ready_queue.put(root_node.id)
 
         # Start dispatcher thread
@@ -267,8 +274,34 @@ class GraphEngine:
         Args:
             event: Event to process
         """
-        with self._event_collector_lock:
-            self._collected_events.append(event)
+        # First, let RSC track execution IDs and types if needed
+        if hasattr(event, "node_id") and hasattr(event, "id"):
+            self.response_coordinator._node_execution_ids[event.node_id] = event.id
+        if hasattr(event, "node_id") and hasattr(event, "node_type"):
+            self.response_coordinator._node_types[event.node_id] = event.node_type
+
+        # Check if RSC wants to intercept this event
+        intercept_handled = False
+        if isinstance(event, GraphBaseNodeEvent):
+            node_id = event.node_id
+            active_session = self.response_coordinator.get_active_session()
+            if active_session:
+                # Let RSC intercept streaming and success events from any node
+                # The RSC will decide if the event is relevant to the active response node
+                if isinstance(event, (NodeRunStreamChunkEvent, NodeRunSucceededEvent)):
+                    intercepted = self.response_coordinator.intercept_event(event, active_session.node_id)
+                    if intercepted:
+                        # Replace the original event with the intercepted one
+                        with self._event_collector_lock:
+                            self._collected_events.append(intercepted)
+                        intercept_handled = True
+                    elif isinstance(event, NodeRunStreamChunkEvent):
+                        # Streaming event was not relevant to response node, suppress it
+                        intercept_handled = True
+
+        if not intercept_handled:
+            with self._event_collector_lock:
+                self._collected_events.append(event)
 
         if isinstance(event, GraphBaseNodeEvent):
             node_id = event.node_id
@@ -277,35 +310,65 @@ class GraphEngine:
             if isinstance(event, NodeRunStartedEvent):
                 with self._executing_nodes_lock:
                     self._executing_nodes.add(node_id)
+
+                # Check if this is a response node starting
+                if self.response_coordinator.is_response_node(node_id):
+                    # Always update with the actual execution ID from the event
+                    self.response_coordinator._node_execution_ids[node_id] = event.id
+                    self.response_coordinator._node_types[node_id] = event.node_type
+
+                    # Check if there's already an active session for this node
+                    active_session = self.response_coordinator.get_active_session()
+                    if not active_session or active_session.node_id != node_id:
+                        # No active session for this node, create one
+                        from core.workflow.graph_engine.response_coordinator import ResponseSession
+
+                        # Get the template for this response node
+                        node = self.graph.nodes[node_id]
+                        template = self._get_response_node_template(node)
+
+                        session = ResponseSession(node_id=node_id, template=template)
+                        self.response_coordinator.on_session_start(session)
+
+                    # Try to flush any available content
+                    streaming_events = self.response_coordinator.try_flush()
+                    self._emit_streaming_events(streaming_events)
             elif isinstance(event, (NodeRunSucceededEvent, NodeRunFailedEvent)):
                 with self._executing_nodes_lock:
                     self._executing_nodes.discard(node_id)
 
+                # End session if this was a response node
+                if isinstance(event, NodeRunSucceededEvent) and self.response_coordinator.is_response_node(node_id):
+                    self.response_coordinator.end_session(node_id)
+
             # Handle streaming chunk events
             if isinstance(event, NodeRunStreamChunkEvent):
-                # Write chunk to output registry
+                # Always write to output registry first
                 self.output_registry.append_chunk(event.selector, event.chunk)
                 if event.is_final:
                     self.output_registry.close_stream(event.selector)
 
-            # Check if this is a response node
-            if self.response_coordinator.is_response_node(node_id):
-                # Handle response node events
-                self.response_coordinator.on_edge_update(node_id)
+                # Update RSC in case any response nodes are waiting
+                streaming_events = self.response_coordinator.on_variable_update(".".join(event.selector))
+                self._emit_streaming_events(streaming_events)
 
             # Handle node completion - add successor nodes to ready queue
             if isinstance(event, NodeRunSucceededEvent):
-                # Add node outputs to variable pool
+                # Add node outputs to variable pool AND output registry
                 for output_key, output_value in event.node_run_result.outputs.items():
                     self.graph_runtime_state.variable_pool.add((node_id, output_key), output_value)
                     self.output_registry.set_scalar([node_id, output_key], output_value)
 
                 # Check if this is an End node and collect its outputs
-                node = self.graph.get_node(node_id)
-                if node and node.type_ == NodeType.END:
+                node = self.graph.nodes[node_id]
+                if node.type_ == NodeType.END:
                     self._collect_end_node_outputs(event)
 
                 self._enqueue_successor_nodes(event)
+
+                # Check if any response nodes can stream new content
+                streaming_events = self.response_coordinator.on_variable_update(f"{node_id}.*")
+                self._emit_streaming_events(streaming_events)
 
     def _collect_end_node_outputs(self, event: NodeRunSucceededEvent) -> None:
         outputs = event.node_run_result.outputs
@@ -347,6 +410,30 @@ class GraphEngine:
                 edge.state = NodeState.TAKEN
                 taken_edges.append(edge)
 
+        # Find all response nodes reachable from taken branches and activate them
+        # Only process if this is a branch node (IF/ELSE, etc)
+        completed_node = self.graph.nodes[completed_node_id]
+        if completed_node._execution_type == NodeExecutionType.BRANCH:
+            for edge in taken_edges:
+                response_nodes = self._find_reachable_response_nodes(edge.head)
+                for response_node_id in response_nodes:
+                    response_node = self.graph.nodes[response_node_id]
+                    if response_node._execution_type == NodeExecutionType.RESPONSE:
+                        # Start a streaming session for this response node immediately
+                        from core.workflow.graph_engine.response_coordinator import ResponseSession
+
+                        # Store the node type but not the execution ID (will be set when node actually runs)
+                        if response_node_id not in self.response_coordinator._node_types:
+                            self.response_coordinator._node_types[response_node_id] = response_node.type_
+
+                        template = self._get_response_node_template(response_node)
+                        session = ResponseSession(node_id=response_node_id, template=template)
+                        self.response_coordinator.on_session_start(session)
+
+                        # Try to stream any available content
+                        streaming_events = self.response_coordinator.try_flush()
+                        self._emit_streaming_events(streaming_events)
+
         # Propagate skipped status to downstream nodes
         for edge in skipped_edges:
             self._mark_node_and_descendants_skipped(edge.head)
@@ -364,6 +451,25 @@ class GraphEngine:
 
             # Check if the node is ready (no unknown edges, at least one taken)
             if self._is_node_ready(target_node_id):
+                # Check if this is a response node that should start streaming immediately
+                target_node = self.graph.nodes[target_node_id]
+                if target_node._execution_type == NodeExecutionType.RESPONSE:
+                    # Start a streaming session for this response node immediately
+                    from core.workflow.graph_engine.response_coordinator import ResponseSession
+
+                    # Store the node type but not the execution ID (will be set when node actually runs)
+                    if target_node_id not in self.response_coordinator._node_types:
+                        self.response_coordinator._node_types[target_node_id] = target_node.type_
+
+                    template = self._get_response_node_template(target_node)
+                    session = ResponseSession(node_id=target_node_id, template=template)
+                    self.response_coordinator.on_session_start(session)
+
+                    # Try to stream any available content
+                    streaming_events = self.response_coordinator.try_flush()
+                    self._emit_streaming_events(streaming_events)
+
+                # Add the node to ready queue
                 self.ready_queue.put(target_node_id)
 
     def _mark_node_and_descendants_skipped(self, node_id: str) -> None:
@@ -444,6 +550,46 @@ class GraphEngine:
         # Node is ready if no unknown edges and at least one taken edge
         return not has_unknown and has_taken
 
+    def _find_reachable_response_nodes(self, start_node_id: str) -> list[str]:
+        """
+        Find all RESPONSE nodes reachable from the given start node using BFS.
+
+        Args:
+            start_node_id: The node ID to start the search from
+
+        Returns:
+            List of response node IDs in the order they were discovered
+        """
+
+        response_nodes: list[str] = []
+        visited: set[str] = set()
+        queue: deque[str] = deque()
+
+        # Initialize queue with start node
+        queue.append(start_node_id)
+        visited.add(start_node_id)
+
+        while queue:
+            current_node_id = queue.popleft()
+            current_node = self.graph.nodes[current_node_id]
+
+            # Check if current node is a response node
+            if current_node._execution_type == NodeExecutionType.RESPONSE:
+                response_nodes.append(current_node_id)
+
+            # Get outgoing edges
+            outgoing_edge_ids = self.graph.out_edges.get(current_node_id, [])
+
+            for edge_id in outgoing_edge_ids:
+                edge = self.graph.edges[edge_id]
+                target_node_id = edge.head
+
+                if target_node_id not in visited:
+                    queue.append(target_node_id)
+                    visited.add(target_node_id)
+
+        return response_nodes
+
     def _should_complete_execution(self) -> bool:
         """
         Check if execution should be considered complete.
@@ -479,3 +625,47 @@ class GraphEngine:
             # Small sleep to avoid busy waiting
             if not self._execution_complete.is_set():
                 time.sleep(0.001)
+
+    def _emit_streaming_events(self, streaming_events: list[GraphEngineEvent]) -> None:
+        """
+        Emit streaming events created by the RSC.
+
+        Args:
+            streaming_events: List of GraphEngineEvent instances from RSC
+        """
+        for event in streaming_events:
+            # Fill in node type if not set
+            if isinstance(event, NodeRunStreamChunkEvent) and event.node_type is None:
+                if event.node_id in self.graph.nodes:
+                    event.node_type = self.graph.nodes[event.node_id].type_
+
+            # Add to collected events to be yielded
+            with self._event_collector_lock:
+                self._collected_events.append(event)
+
+    def _get_response_node_template(self, node: Node):
+        """
+        Get the template for a response node.
+
+        Args:
+            node: The response node
+
+        Returns:
+            Template instance
+        """
+
+        # Check if this is an End node
+        if node.type_ == NodeType.END:
+            from core.workflow.nodes.end.end_node import EndNode
+
+            if isinstance(node, EndNode):
+                return node.get_streaming_template()
+        # Check if this is an Answer node
+        elif node.type_ == NodeType.ANSWER:
+            from core.workflow.nodes.answer.answer_node import AnswerNode
+
+            if isinstance(node, AnswerNode):
+                # Create template from answer node data
+                return Template.from_answer_template(node._node_data.answer)
+
+        raise ValueError(f"Unsupported response node type: {node.type_}")

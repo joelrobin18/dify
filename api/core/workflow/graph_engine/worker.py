@@ -73,26 +73,9 @@ class Worker(threading.Thread):
                 except queue.Empty:
                     continue
 
-                # Get the node from the graph
-                node = self.graph.get_node(node_id)
-                if node is None:
-                    error_event = NodeRunFailedEvent(
-                        id=str(uuid4()),
-                        node_id=node_id,
-                        node_type=NodeType.CODE,  # Default type
-                        parallel_id=None,
-                        in_iteration_id=None,
-                        error=f"Node {node_id} not found in graph",
-                        start_at=datetime.now(),
-                    )
-                    self.event_queue.put(error_event)
-                    self.ready_queue.task_done()
-                    continue
-
-                # Execute the node
+                node = self.graph.nodes[node_id]
                 self._execute_node(node)
 
-                # Mark task as done
                 self.ready_queue.task_done()
 
             except Exception as e:
@@ -122,70 +105,56 @@ class Worker(threading.Thread):
         # Generate a single node execution ID to use for all events
         node_execution_id = str(uuid4())
 
-        try:
-            # Create and push start event with required fields
-            start_at = naive_utc_now()
-            start_event = NodeRunStartedEvent(
-                id=node_execution_id,  # Required: node execution id
-                node_id=node.id,
-                node_type=node.type_,
-                node_title=node.title,
-                parallel_id=None,
-                in_iteration_id=None,
-                start_at=start_at,
-                node_run_index=0,
-            )
+        # Create and push start event with required fields
+        start_at = naive_utc_now()
+        start_event = NodeRunStartedEvent(
+            id=node_execution_id,  # Required: node execution id
+            node_id=node.id,
+            node_type=node.type_,
+            node_title=node.title,
+            parallel_id=None,
+            in_iteration_id=None,
+            start_at=start_at,
+            node_run_index=0,
+        )
 
-            # === FIXME(-LAN-): shouldn't access private _node_data here, need to refactor
-            from core.workflow.nodes.tool.tool_node import ToolNode
+        # === FIXME(-LAN-): shouldn't access private _node_data here, need to refactor
+        from core.workflow.nodes.tool.tool_node import ToolNode
 
-            if isinstance(node, ToolNode):
-                start_event.provider_id = node._node_data.provider_id
-                start_event.provider_type = node._node_data.provider_type.value
-            # ===
+        if isinstance(node, ToolNode):
+            start_event.provider_id = node._node_data.provider_id
+            start_event.provider_type = node._node_data.provider_type.value
+        # ===
 
-            self.event_queue.put(start_event)
+        self.event_queue.put(start_event)
 
-            # Execute the node
-            # Call the node's _run method (internal execution)
-            node_events = node.run()
+        # Execute the node
+        # Call the node's _run method (internal execution)
+        node_events = node.run()
 
-            # Process node events and extract run result
-            node_run_result = None
+        # Process node events and extract run result
+        node_run_result = None
 
-            for event in node_events:
-                # Forward event to dispatcher immediately for streaming
-                self.event_queue.put(event)
+        for event in node_events:
+            # Forward event to dispatcher immediately for streaming
+            self.event_queue.put(event)
 
-                # Check if this is the run completed event
-                if isinstance(event, NodeRunCompletedEvent) and node_run_result is None:
-                    node_run_result = event.run_result
+            # Check if this is the run completed event
+            if isinstance(event, NodeRunCompletedEvent) and node_run_result is None:
+                node_run_result = event.run_result
 
-            # Ensure we got a run result
-            if node_run_result is None:
-                raise RuntimeError(f"Node {node.id} execution completed without a RunCompletedEvent")
+        # Ensure we got a run result
+        if node_run_result is None:
+            raise RuntimeError(f"Node {node.id} execution completed without a RunCompletedEvent")
 
-            # Create and push success event
-            success_event = NodeRunSucceededEvent(
-                id=node_execution_id,  # Use same node execution id
-                node_id=node.id,
-                node_type=node.type_,
-                parallel_id=None,
-                in_iteration_id=None,
-                start_at=start_at,
-                node_run_result=node_run_result,
-            )
-            self.event_queue.put(success_event)
-
-        except Exception as e:
-            # Create and push failure event
-            failure_event = NodeRunFailedEvent(
-                id=node_execution_id,  # Use same node execution id
-                node_id=node.id,
-                node_type=node.type_,
-                parallel_id=None,
-                in_iteration_id=None,
-                error=str(e),  # Convert exception to string
-                start_at=datetime.now(),
-            )
-            self.event_queue.put(failure_event)
+        # Create and push success event
+        success_event = NodeRunSucceededEvent(
+            id=node_execution_id,  # Use same node execution id
+            node_id=node.id,
+            node_type=node.type_,
+            parallel_id=None,
+            in_iteration_id=None,
+            start_at=start_at,
+            node_run_result=node_run_result,
+        )
+        self.event_queue.put(success_event)

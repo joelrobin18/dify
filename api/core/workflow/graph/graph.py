@@ -224,24 +224,6 @@ class Graph:
         """
         return list(self.nodes.keys())
 
-    def get_node(self, node_id: str) -> Optional[Node]:
-        """
-        Get node by ID (V2 method)
-
-        :param node_id: node id
-        :return: node object or None
-        """
-        return self.nodes.get(node_id)
-
-    def get_edge(self, edge_id: str) -> Optional[Edge]:
-        """
-        Get edge by ID (V2 method)
-
-        :param edge_id: edge id
-        :return: edge object or None
-        """
-        return self.edges.get(edge_id)
-
     def get_outgoing_edges(self, node_id: str) -> list[Edge]:
         """
         Get all outgoing edges from a node (V2 method)
