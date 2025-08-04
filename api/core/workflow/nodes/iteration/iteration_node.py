@@ -180,7 +180,6 @@ class IterationNode(Node):
         graph_engine = GraphEngine(
             tenant_id=self.tenant_id,
             app_id=self.app_id,
-            workflow_type=self.workflow_type,
             workflow_id=self.workflow_id,
             user_id=self.user_id,
             user_from=self.user_from,
@@ -653,7 +652,6 @@ class IterationNode(Node):
             graph_engine_copy = GraphEngine(
                 tenant_id=graph_engine.tenant_id,
                 app_id=graph_engine.app_id,
-                workflow_type=graph_engine.workflow_type,
                 workflow_id=graph_engine.workflow_id,
                 user_id=graph_engine.user_id,
                 user_from=graph_engine.user_from,

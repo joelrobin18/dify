@@ -46,7 +46,6 @@ class GraphEngine:
         self,
         tenant_id: str,
         app_id: str,
-        workflow_type: WorkflowType,
         workflow_id: str,
         user_id: str,
         user_from: UserFrom,
@@ -81,7 +80,6 @@ class GraphEngine:
         # Store initialization parameters
         self.tenant_id = tenant_id
         self.app_id = app_id
-        self.workflow_type = workflow_type
         self.workflow_id = workflow_id
         self.user_id = user_id
         self.user_from = user_from

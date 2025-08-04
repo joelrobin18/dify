@@ -200,7 +200,6 @@ class ContinueOnErrorTestHelper:
         return GraphEngine(
             tenant_id="111",
             app_id="222",
-            workflow_type=WorkflowType.CHAT,
             workflow_id="333",
             graph_config=graph_config,
             user_id="444",

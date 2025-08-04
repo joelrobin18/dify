@@ -148,7 +148,6 @@ class LoopNode(Node):
         graph_engine = GraphEngine(
             tenant_id=self.tenant_id,
             app_id=self.app_id,
-            workflow_type=self.workflow_type,
             workflow_id=self.workflow_id,
             user_id=self.user_id,
             user_from=self.user_from,

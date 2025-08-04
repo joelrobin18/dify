@@ -23,7 +23,6 @@ from core.workflow.graph_engine import GraphEngine
 from core.workflow.nodes.node_factory import DefaultNodeFactory
 from core.workflow.system_variable import SystemVariable
 from models.enums import UserFrom
-from models.workflow import WorkflowType
 
 
 @dataclass
@@ -149,11 +148,6 @@ class TableTestRunner:
             # Load fixture data
             fixture_data = self.workflow_runner.load_fixture(test_case.fixture_path)
 
-            # Extract workflow type
-            app_config = fixture_data.get("app", {})
-            app_mode = app_config.get("mode", "workflow")
-            workflow_type = WorkflowType.CHAT if app_mode == "chat" else WorkflowType.WORKFLOW
-
             # Create graph from fixture
             graph, graph_runtime_state = self.workflow_runner.create_graph_from_fixture(fixture_data, test_case.inputs)
 
@@ -165,7 +159,6 @@ class TableTestRunner:
             engine = GraphEngine(
                 tenant_id="test_tenant",
                 app_id="test_app",
-                workflow_type=workflow_type,
                 workflow_id="test_workflow",
                 user_id="test_user",
                 user_from=UserFrom.ACCOUNT,

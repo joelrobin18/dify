@@ -70,7 +70,6 @@ class WorkflowEntry:
         self.graph_engine = GraphEngine(
             tenant_id=tenant_id,
             app_id=app_id,
-            workflow_type=workflow_type,
             workflow_id=workflow_id,
             user_id=user_id,
             user_from=user_from,
