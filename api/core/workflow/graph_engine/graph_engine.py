@@ -202,6 +202,17 @@ class GraphEngine:
             if node._execution_type == NodeExecutionType.RESPONSE:
                 self.response_coordinator.register(node.id)
 
+                # Check if this response node has no branch dependencies
+                # If so, start its session immediately as per SPEC section 5.3
+                if self._has_no_branch_dependencies(node.id):
+                    # Store the node type
+                    self.response_coordinator._node_types[node.id] = node.type_
+
+                    # Get template and start session
+                    template = self._get_response_node_template(node)
+                    session = ResponseSession(node_id=node.id, template=template)
+                    self.response_coordinator.on_session_start(session)
+
         self.ready_queue.put(root_node.id)
 
         # Start dispatcher thread
@@ -644,6 +655,43 @@ class GraphEngine:
             # Add to collected events to be yielded
             with self._event_collector_lock:
                 self._collected_events.append(event)
+
+    def _has_no_branch_dependencies(self, node_id: str) -> bool:
+        """
+        Check if a node has no branch dependencies in its upstream path.
+
+        Args:
+            node_id: The ID of the node to check
+
+        Returns:
+            True if the node has no branch dependencies, False otherwise
+        """
+        visited = set()
+        queue = [node_id]
+
+        while queue:
+            current_id = queue.pop(0)
+            if current_id in visited:
+                continue
+
+            visited.add(current_id)
+
+            # Get incoming edges
+            incoming_edge_ids = self.graph.in_edges.get(current_id, [])
+
+            for edge_id in incoming_edge_ids:
+                edge = self.graph.edges[edge_id]
+                source_node_id = edge.tail
+                source_node = self.graph.nodes[source_node_id]
+
+                # Check if source is a branch node
+                if source_node._execution_type == NodeExecutionType.BRANCH:
+                    return False
+
+                # Continue traversing upstream
+                queue.append(source_node_id)
+
+        return True
 
     def _get_response_node_template(self, node: Node):
         """

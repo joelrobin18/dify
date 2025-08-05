@@ -7,17 +7,16 @@ of responses based on upstream node outputs and constants.
 
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import Any, Optional, cast
+from uuid import uuid4
 
 from core.workflow.enums import NodeType
 from core.workflow.events import GraphBaseNodeEvent, GraphEngineEvent, NodeRunStreamChunkEvent, NodeRunSucceededEvent
+from core.workflow.graph import Graph
 from core.workflow.graph_engine.output_registry import OutputRegistry
 from core.workflow.nodes.base.template import Template, TextSegment, VariableSegment
-
-if TYPE_CHECKING:
-    from core.workflow.graph import Graph
 
 
 @dataclass
@@ -26,8 +25,7 @@ class ResponseSession:
 
     node_id: str
     template: Template  # Template object from the response node
-    streamed_segments: set[int] = field(default_factory=set)  # Track which segments have been streamed
-    pending_text_segments: set[int] = field(default_factory=set)  # Text segments waiting for node execution ID
+    index: int = 0  # Current position in the template segments
 
 
 class ResponseStreamCoordinator:
@@ -104,10 +102,21 @@ class ResponseStreamCoordinator:
         Returns:
             List of streaming events to be emitted
         """
-        _ = selector  # Mark as intentionally unused
         with self.lock:
-            if self.active_session:
-                return self.try_flush()
+            if not self.active_session:
+                return []
+
+            # Check if the updated selector matches the current segment
+            template = self.active_session.template
+            if self.active_session.index < len(template.segments):
+                current_segment = template.segments[self.active_session.index]
+
+                # If current segment is a VariableSegment matching this selector, try to flush
+                if isinstance(current_segment, VariableSegment):
+                    selector_str = ".".join(current_segment.selector)
+                    if selector_str == selector:
+                        return self.try_flush()
+
             return []
 
     def intercept_event(self, event: GraphEngineEvent, response_node_id: str) -> Optional[GraphEngineEvent]:
@@ -178,46 +187,12 @@ class ResponseStreamCoordinator:
             from_variable_selector=list(selector),
         )
 
-    def _process_pending_text_segments(
-        self, response_node_id: str, response_node_exec_id: str, template: Template
-    ) -> list[GraphEngineEvent]:
-        """Process any pending text segments."""
-        events: list[GraphEngineEvent] = []
-
-        if not (response_node_exec_id and self.active_session and self.active_session.pending_text_segments):
-            return events
-
-        response_node_type = self._get_node_type(response_node_id)
-        if not response_node_type:
-            return events
-
-        for seg_idx in sorted(self.active_session.pending_text_segments):
-            if seg_idx >= len(template.segments) or seg_idx in self.active_session.streamed_segments:
-                continue
-
-            segment = template.segments[seg_idx]
-            if isinstance(segment, TextSegment):
-                events.append(
-                    self._create_stream_chunk_event(
-                        node_id=response_node_id,
-                        node_type=response_node_type,
-                        execution_id=response_node_exec_id,
-                        selector=[response_node_id, "output"],
-                        chunk=segment.text,
-                        is_final=False,
-                    )
-                )
-                self.active_session.streamed_segments.add(seg_idx)
-
-        self.active_session.pending_text_segments.clear()
-        return events
-
-    def _process_variable_segment(self, segment: VariableSegment, segment_index: int) -> list[GraphEngineEvent]:
-        """Process a variable segment."""
-        from uuid import uuid4
+    def _process_variable_segment(self, segment: VariableSegment) -> tuple[list[GraphEngineEvent], bool]:
+        """Process a variable segment. Returns (events, is_complete)."""
 
         events: list[GraphEngineEvent] = []
         source_node_id = segment.selector[0]
+        is_complete = False
 
         if self.registry and self.registry.has_unread(segment.selector):
             # Stream all available chunks
@@ -225,8 +200,15 @@ class ResponseStreamCoordinator:
             source_node_type = self._get_node_type(source_node_id)
 
             if source_node_type:
+                # Check if this is the last chunk by looking ahead
+                stream_closed = self.registry.stream_closed(segment.selector)
+
                 while self.registry and self.registry.has_unread(segment.selector):
                     if chunk := self.registry.pop_chunk(segment.selector):
+                        # Check if this is the final chunk
+                        has_more = self.registry.has_unread(segment.selector)
+                        is_final_chunk = stream_closed and not has_more
+
                         events.append(
                             self._create_stream_chunk_event(
                                 node_id=source_node_id,
@@ -234,12 +216,13 @@ class ResponseStreamCoordinator:
                                 execution_id=source_exec_id,
                                 selector=segment.selector,
                                 chunk=chunk,
-                                is_final=False,
+                                is_final=is_final_chunk,
                             )
                         )
 
-            if self.registry and self.registry.stream_closed(segment.selector) and self.active_session:
-                self.active_session.streamed_segments.add(segment_index)
+            # Check if stream is closed to determine if segment is complete
+            if self.registry and self.registry.stream_closed(segment.selector):
+                is_complete = True
 
         elif self.registry and (value := self.registry.get_scalar(segment.selector)):
             # Process scalar value
@@ -257,19 +240,16 @@ class ResponseStreamCoordinator:
                         is_final=True,
                     )
                 )
-            if self.active_session:
-                self.active_session.streamed_segments.add(segment_index)
+            is_complete = True
 
-        return events
+        return events, is_complete
 
     def _process_text_segment(
-        self, segment: TextSegment, segment_index: int, response_node_id: str, response_node_exec_id: Optional[str]
+        self, segment: TextSegment, response_node_id: str, response_node_exec_id: Optional[str]
     ) -> tuple[list[GraphEngineEvent], bool]:
-        """Process a text segment. Returns (events, should_continue)."""
+        """Process a text segment. Returns (events, is_complete)."""
         if not response_node_exec_id:
-            if self.active_session:
-                self.active_session.pending_text_segments.add(segment_index)
-            return [], False  # Stop processing to maintain order
+            return [], False  # Cannot process without execution ID
 
         response_node_type = self._get_node_type(response_node_id)
         if response_node_type:
@@ -281,13 +261,9 @@ class ResponseStreamCoordinator:
                 chunk=segment.text,
                 is_final=False,
             )
-            if self.active_session:
-                self.active_session.streamed_segments.add(segment_index)
-            return [event], True
+            return [event], True  # Text segments are always immediately complete
 
-        if self.active_session:
-            self.active_session.streamed_segments.add(segment_index)
-        return [], True
+        return [], True  # Complete even without type info
 
     def try_flush(self) -> list[GraphEngineEvent]:
         """Try to flush output from the active session.
@@ -303,24 +279,34 @@ class ResponseStreamCoordinator:
             response_node_id = self.active_session.node_id
             response_node_exec_id = self._node_execution_ids.get(response_node_id)
 
-            # Process pending text segments first
             events: list[GraphEngineEvent] = []
-            if response_node_exec_id:
-                events = self._process_pending_text_segments(response_node_id, response_node_exec_id, template)
 
-            # Process each segment in order
-            for i, segment in enumerate(template.segments):
-                if i in self.active_session.streamed_segments:
-                    continue
+            # Process segments sequentially from current index
+            while self.active_session.index < len(template.segments):
+                segment = template.segments[self.active_session.index]
 
                 if isinstance(segment, VariableSegment):
-                    events.extend(self._process_variable_segment(segment, i))
+                    segment_events, is_complete = self._process_variable_segment(segment)
+                    events.extend(segment_events)
+
+                    # Only advance index if this variable segment is complete
+                    if is_complete:
+                        self.active_session.index += 1
+                    else:
+                        # Wait for more data
+                        break
+
                 elif isinstance(segment, TextSegment):
-                    segment_events, should_continue = self._process_text_segment(
-                        segment, i, response_node_id, response_node_exec_id
+                    segment_events, is_complete = self._process_text_segment(
+                        segment, response_node_id, response_node_exec_id
                     )
                     events.extend(segment_events)
-                    if not should_continue:
+
+                    # Text segments are always immediately complete
+                    if is_complete:
+                        self.active_session.index += 1
+                    else:
+                        # Cannot proceed without execution ID
                         break
 
             return events
